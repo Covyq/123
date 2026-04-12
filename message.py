@@ -105,7 +105,7 @@ async def on_ready():
                         try:
                             msg: Message = await channel.fetch_message(timer.message_id)
                             name = timer.author_name or f"<@{timer.author_id}>"
-                            if timer.author_id else ""
+                            name = (timer.author_name or f"<@{timer.author_id}>") if timer.author_id else ""
                             header = f"👤 {name} · создан в <t:{timer.created_at}:t>" if name else ""
                             content = f"{header}\n{timer.text}\n✅ **Готово**".strip()
                             await msg.edit(content=content, view=None)
