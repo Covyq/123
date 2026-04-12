@@ -249,7 +249,3 @@ token = os.environ.get("DISCORD_BOT_TOKEN")
 if not token:
     print("ОШИБКА: Токен не найден!")
     exit(1)
-
-DSBot.run(token)
-
-DSBot.run(token)
