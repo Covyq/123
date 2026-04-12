@@ -1,2 +1,2 @@
 peewee
-discord.py
+discord.com>=2.0.0
