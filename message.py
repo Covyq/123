@@ -11,12 +11,15 @@ db = SqliteDatabase('TimerDataBase.db')
 DSBot = Bot(intents=Intents.all())
 GUILD_ID = 1278259070666801214
 
+# ─── Модели ─────────────────────────────────────────────────────────────────── 
 class TableBase(Model):
     guild_id = BigIntegerField()
+    
     class Meta:
         database = db
 
 class Table_SkladTimer(TableBase):
+    """Таймеры склада — при истечении сообщение удаляется"""
     channel_id = BigIntegerField()
     message_id = BigIntegerField()
     text = TextField()
@@ -27,6 +30,7 @@ class Table_SkladTimer(TableBase):
     created_at = BigIntegerField(default=0)
 
 class Table_SimpleTimer(TableBase):
+    """Обычные таймеры — при истечении показывают 'Готово'"""
     channel_id = BigIntegerField()
     message_id = BigIntegerField()
     text = TextField()
@@ -59,6 +63,7 @@ with db:
     except Exception:
         pass
 
+# ─── Вспомогательные функции ────────────────────────────────────────────────── 
 def get_channel_id(table, guild_id: int) -> int | None:
     try:
         return table.get(table.guild_id == guild_id).channel_id
@@ -81,6 +86,7 @@ def format_sklad_text(hex_val: str, region: str, warehouse: str, password: str) 
         f"**Пароль:** {password}"
     )
 
+# ─── Фоновый цикл ──────────────────────────────────────────────────────────── 
 @DSBot.event
 async def on_ready():
     print(f"Бот {DSBot.user} запущен и готов к работе!")
@@ -117,6 +123,7 @@ async def on_ready():
         
         await asyncio.sleep(6)
 
+# ─── Команды настройки каналов ──────────────────────────────────────────────── 
 @DSBot.slash_command(name="setskladchannel", guild_ids=[GUILD_ID], description="Установить канал для таймеров склада (только администраторы)")
 async def setskladchannel_command(ctx: ApplicationContext, channel: Option(SlashCommandOptionType.channel, description="Канал", channel_types=[ChannelType.text])):
     if not ctx.author.guild_permissions.administrator:
@@ -146,6 +153,7 @@ async def channels_command(ctx: ApplicationContext):
         ephemeral=True
     )
 
+# ─── /склад ─────────────────────────────────────────────────────────────────── 
 @DSBot.slash_command(name="склад", guild_ids=[GUILD_ID], description="Создать таймер склада")
 async def timer_command(ctx: ApplicationContext, 
     hex_val: Option(SlashCommandOptionType.string, name="гекс", description="Гекс"), 
@@ -177,6 +185,7 @@ async def timer_command(ctx: ApplicationContext,
     
     await ctx.respond("✅ Таймер склада установлен на 2 дня и 1 час!", ephemeral=True)
 
+# ─── /таймер ───────────────────────────────────────────────────────────────── 
 @DSBot.slash_command(name="таймер", guild_ids=[GUILD_ID], description="Создать обычный таймер")
 async def simpletimer_command(ctx: ApplicationContext, 
     text: Option(SlashCommandOptionType.string, name="текст", description="Текст таймера"), 
@@ -204,6 +213,7 @@ async def simpletimer_command(ctx: ApplicationContext,
     
     await ctx.respond("✅ Таймер установлен!", ephemeral=True)
 
+# ─── Кнопка обновления ─────────────────────────────────────────────────────── 
 async def on_button_clicked(interaction: Interaction):
     if interaction.type == InteractionType.component:
         if interaction.data.get("custom_id") == "update_sklad_timer":
@@ -222,6 +232,7 @@ async def on_button_clicked(interaction: Interaction):
 
 DSBot.add_listener(func=on_button_clicked, name="on_interaction")
 
+# ─── Очистка при ручном удалении ───────────────────────────────────────────── 
 @DSBot.event
 async def on_message_delete(message: Message):
     with db:
@@ -233,9 +244,12 @@ async def on_message_delete(message: Message):
             except table.DoesNotExist:
                 pass
 
+# ─── Запуск ─────────────────────────────────────────────────────────────────── 
 token = os.environ.get("DISCORD_BOT_TOKEN")
 if not token:
     print("ОШИБКА: Токен не найден!")
     exit(1)
+
+DSBot.run(token)
 
 DSBot.run(token)
