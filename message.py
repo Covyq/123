@@ -73,7 +73,6 @@ def get_channel(guild_id, type_):
     )
     return row.channel_id if row else None
 
-
 # ─── VIEW СКЛАД ───────────────────────────────────────────
 class SkladView(View):
     def __init__(self):
@@ -84,6 +83,7 @@ class SkladView(View):
             style=discord.ButtonStyle.green,
             custom_id="sklad_update_btn"
         )
+
         delete_btn = Button(
             label="Удалить",
             style=discord.ButtonStyle.red,
@@ -140,7 +140,6 @@ class SkladView(View):
         except Exception:
             print(traceback.format_exc())
 
-
 # ─── VIEW ТАЙМЕР ──────────────────────────────────────────
 class TimerView(View):
     def __init__(self):
@@ -173,7 +172,6 @@ class TimerView(View):
         except Exception:
             print(traceback.format_exc())
 
-
 # ─── LOOP ─────────────────────────────────────────────────
 @tasks.loop(seconds=30)
 async def loop():
@@ -203,7 +201,6 @@ async def loop():
 
         t.delete_instance()
 
-
 # ─── READY ────────────────────────────────────────────────
 @bot.event
 async def on_ready():
@@ -214,7 +211,6 @@ async def on_ready():
 
     if not loop.is_running():
         loop.start()
-
 
 # ─── КОМАНДЫ ──────────────────────────────────────────────
 @bot.slash_command(name="таймер", guild_ids=[GUILD_ID])
@@ -248,7 +244,6 @@ async def timer(ctx, название: str, days: int = 0, hours: int = 0, minut
     )
 
     await ctx.respond("✅ Таймер создан", ephemeral=True)
-
 
 # ─── RUN ────────────────────────────────────────────────
 bot.run(os.environ.get("DISCORD_BOT_TOKEN"))
