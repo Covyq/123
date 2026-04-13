@@ -77,22 +77,37 @@ class SkladView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(
-        label="Обновить склад",
-        style=discord.ButtonStyle.green,
-        custom_id="sklad_update"
-    )
-    async def update(self, button: Button, interaction: discord.Interaction):
+        self.add_item(Button(
+            label="Обновить склад",
+            style=discord.ButtonStyle.green,
+            custom_id="sklad_update_btn"
+        ))
+
+        self.add_item(Button(
+            label="Удалить",
+            style=discord.ButtonStyle.red,
+            custom_id="sklad_delete_btn"
+        ))
+
+    @discord.ui.button(label="hidden", style=discord.ButtonStyle.gray, custom_id="hidden", disabled=True)
+    async def dummy(self, *_):
+        pass
+
+    async def interaction_check(self, interaction: discord.Interaction):
+        return True
+
+    @discord.ui.button(label="Обновить склад", style=discord.ButtonStyle.green, custom_id="sklad_update_btn")
+    async def update(self, button, interaction):
         try:
             row = Timer.get_or_none(Timer.message_id == interaction.message.id)
 
             if not row:
                 await interaction.response.send_message("❌ Склад не найден", ephemeral=True)
-                return
+                return False
 
             if interaction.user.id != row.author:
                 await interaction.response.send_message("❌ Не твой склад", ephemeral=True)
-                return
+                return False
 
             new_end = int((datetime.datetime.utcnow() + datetime.timedelta(hours=48)).timestamp())
             row.time_end = new_end
@@ -104,46 +119,46 @@ class SkladView(View):
             )
 
             await interaction.response.send_message("✅ Склад обновлён", ephemeral=True)
+            return False
 
         except Exception:
             print(traceback.format_exc())
-            await interaction.response.send_message("❌ Ошибка", ephemeral=True)
+            return False
 
-    @discord.ui.button(
-        label="Удалить",
-        style=discord.ButtonStyle.red,
-        custom_id="sklad_delete"
-    )
-    async def delete(self, button: Button, interaction: discord.Interaction):
+    @discord.ui.button(label="Удалить", style=discord.ButtonStyle.red, custom_id="sklad_delete_btn")
+    async def delete(self, button, interaction):
         try:
             row = Timer.get_or_none(Timer.message_id == interaction.message.id)
 
             if not row:
                 await interaction.response.send_message("❌ Уже удалено", ephemeral=True)
-                return
+                return False
 
             if interaction.user.id != row.author:
                 await interaction.response.send_message("❌ Не твой склад", ephemeral=True)
-                return
+                return False
 
             row.delete_instance()
             await interaction.message.delete()
+            return False
 
         except Exception:
             print(traceback.format_exc())
-            await interaction.response.send_message("❌ Ошибка", ephemeral=True)
+            return False
 
 # ─── VIEW ТАЙМЕР ──────────────────────────────────────────
 class TimerView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(
-        label="Удалить таймер",
-        style=discord.ButtonStyle.red,
-        custom_id="timer_delete"
-    )
-    async def delete(self, button: Button, interaction: discord.Interaction):
+        self.add_item(Button(
+            label="Удалить таймер",
+            style=discord.ButtonStyle.red,
+            custom_id="timer_delete_btn"
+        ))
+
+    @discord.ui.button(label="Удалить таймер", style=discord.ButtonStyle.red, custom_id="timer_delete_btn")
+    async def delete(self, button, interaction):
         try:
             row = Timer.get_or_none(Timer.message_id == interaction.message.id)
 
@@ -160,7 +175,6 @@ class TimerView(View):
 
         except Exception:
             print(traceback.format_exc())
-            await interaction.response.send_message("❌ Ошибка", ephemeral=True)
 
 # ─── LOOP ─────────────────────────────────────────────────
 @tasks.loop(seconds=30)
@@ -196,7 +210,6 @@ async def loop():
 async def on_ready():
     print(f"✅ Бот запущен: {bot.user}")
 
-    # 🔥 важно для persistent view
     bot.add_view(SkladView())
     bot.add_view(TimerView())
 
@@ -204,58 +217,23 @@ async def on_ready():
         loop.start()
 
 # ─── КОМАНДЫ ──────────────────────────────────────────────
-@bot.slash_command(name="setskladchannel", guild_ids=[GUILD_ID])
-async def setskladchannel(ctx, channel: discord.TextChannel):
-
-    if not has_access(ctx.author):
-        await ctx.respond("❌ Нет прав", ephemeral=True)
-        return
-
-    set_channel(ctx.guild.id, channel.id, "sklad")
-    await ctx.respond(f"✅ Канал складов: {channel.mention}", ephemeral=True)
-
-
-@bot.slash_command(name="setsimpletimer", guild_ids=[GUILD_ID])
-async def setsimpletimer(ctx, channel: discord.TextChannel):
-
-    if not has_access(ctx.author):
-        await ctx.respond("❌ Нет прав", ephemeral=True)
-        return
-
-    set_channel(ctx.guild.id, channel.id, "simple")
-    await ctx.respond(f"✅ Канал таймеров: {channel.mention}", ephemeral=True)
-
-
 @bot.slash_command(name="таймер", guild_ids=[GUILD_ID])
-async def timer(
-    ctx,
-    название: str,
-    days: int = 0,
-    hours: int = 0,
-    minutes: int = 0
-):
+async def timer(ctx, название: str, days: int = 0, hours: int = 0, minutes: int = 0):
+
     if days == 0 and hours == 0 and minutes == 0:
         await ctx.respond("❌ Укажи время", ephemeral=True)
         return
 
-    channel_id = get_channel(ctx.guild.id, "simple")
-    if channel_id and ctx.channel.id != channel_id:
-        await ctx.respond("❌ Не тот канал", ephemeral=True)
-        return
-
-    now = datetime.datetime.utcnow()
-    end = now + datetime.timedelta(days=days, hours=hours, minutes=minutes)
+    end = datetime.datetime.utcnow() + datetime.timedelta(days=days, hours=hours, minutes=minutes)
     end_ts = int(end.timestamp())
 
     try:
         msg = await ctx.send(
-            f"⏳ **{название}**\n"
-            f"👤 Создал: {ctx.author.mention}\n"
-            f"⏰ <t:{end_ts}:R>",
+            f"⏳ **{название}**\n👤 {ctx.author.mention}\n⏰ <t:{end_ts}:R>",
             view=TimerView()
         )
     except discord.Forbidden:
-        await ctx.respond("❌ Бот не имеет доступа к каналу", ephemeral=True)
+        await ctx.respond("❌ Нет доступа к каналу", ephemeral=True)
         return
 
     Timer.create(
@@ -268,51 +246,6 @@ async def timer(
     )
 
     await ctx.respond("✅ Таймер создан", ephemeral=True)
-
-
-@bot.slash_command(name="склад", guild_ids=[GUILD_ID])
-async def sklad(
-    ctx,
-    гекс: str,
-    регион: str,
-    склад: str,
-    пароль: str
-):
-
-    channel_id = get_channel(ctx.guild.id, "sklad")
-    if channel_id and ctx.channel.id != channel_id:
-        await ctx.respond("❌ Не тот канал", ephemeral=True)
-        return
-
-    end_ts = int((datetime.datetime.utcnow() + datetime.timedelta(hours=48)).timestamp())
-
-    text = (
-        f"👤 {ctx.author.display_name}\n"
-        f"**Гекс:** {гекс}\n"
-        f"**Регион:** {регион}\n"
-        f"**Склад:** {склад}\n"
-        f"**Пароль:** {пароль}"
-    )
-
-    try:
-        msg = await ctx.send(
-            f"{text}\n\n⏰ 48 часов (<t:{end_ts}:R>)",
-            view=SkladView()
-        )
-    except discord.Forbidden:
-        await ctx.respond("❌ Бот не имеет доступа к каналу", ephemeral=True)
-        return
-
-    Timer.create(
-        guild_id=ctx.guild.id,
-        channel_id=ctx.channel.id,
-        message_id=msg.id,
-        text=text,
-        time_end=end_ts,
-        author=ctx.author.id
-    )
-
-    await ctx.respond("✅ Склад создан", ephemeral=True)
 
 # ─── RUN ────────────────────────────────────────────────
 bot.run(os.environ.get("DISCORD_BOT_TOKEN"))
