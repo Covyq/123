@@ -17,6 +17,12 @@ bot = discord.Bot(
 
 db = SqliteDatabase("TimerDataBase.db")
 
+# ─── КЭШ КАНАЛОВ ───────────────────────────────────────────
+CHANNEL_CACHE = {
+    "sklad": {},
+    "simple": {}
+}
+
 # ─── БАЗА ──────────────────────────────────────────────────
 class BaseModel(Model):
     guild_id = BigIntegerField()
@@ -26,6 +32,7 @@ class BaseModel(Model):
 
 
 class ChannelConfig(BaseModel):
+    guild_id = BigIntegerField()
     channel_id = BigIntegerField()
     type = TextField()
 
@@ -42,6 +49,19 @@ class Timer(BaseModel):
 db.connect(reuse_if_open=True)
 db.create_tables([ChannelConfig, Timer])
 
+# ─── ЗАГРУЗКА КАНАЛОВ ПОСЛЕ РЕСТАРТА ──────────────────────
+def load_channels():
+    global CHANNEL_CACHE
+
+    CHANNEL_CACHE = {
+        "sklad": {},
+        "simple": {}
+    }
+
+    for row in ChannelConfig.select():
+        CHANNEL_CACHE[row.type][row.guild_id] = row.channel_id
+
+
 # ─── ПРАВА ────────────────────────────────────────────────
 def has_access(member):
     return (
@@ -55,6 +75,7 @@ def set_channel(guild_id, channel_id, type_):
         (ChannelConfig.guild_id == guild_id) &
         (ChannelConfig.type == type_)
     )
+
     if row:
         row.channel_id = channel_id
         row.save()
@@ -65,13 +86,15 @@ def set_channel(guild_id, channel_id, type_):
             type=type_
         )
 
+    # 🔥 обновляем кэш
+    if guild_id not in CHANNEL_CACHE[type_]:
+        CHANNEL_CACHE[type_] = {}
+
+    CHANNEL_CACHE[type_][guild_id] = channel_id
+
 
 def get_channel(guild_id, type_):
-    row = ChannelConfig.get_or_none(
-        (ChannelConfig.guild_id == guild_id) &
-        (ChannelConfig.type == type_)
-    )
-    return row.channel_id if row else None
+    return CHANNEL_CACHE.get(type_, {}).get(guild_id)
 
 # ─── VIEW СКЛАД ───────────────────────────────────────────
 class SkladView(View):
@@ -104,7 +127,7 @@ class SkladView(View):
                 await interaction.response.send_message("❌ Склад не найден", ephemeral=True)
                 return
 
-            # ✅ ОБНОВЛЕНИЕ МОЖЕТ ЛЮБОЙ
+            # ✅ любой может обновлять
 
             new_end = int((datetime.datetime.utcnow() + datetime.timedelta(hours=48)).timestamp())
             row.time_end = new_end
@@ -116,7 +139,7 @@ class SkladView(View):
             )
 
             await interaction.response.send_message(
-                f"✅ Склад обновлён пользователем {interaction.user.mention}",
+                f"✅ Обновил: {interaction.user.mention}",
                 ephemeral=True
             )
 
@@ -132,7 +155,7 @@ class SkladView(View):
                 return
 
             if interaction.user.id != row.author:
-                await interaction.response.send_message("❌ Удалять может только создатель склада", ephemeral=True)
+                await interaction.response.send_message("❌ Только автор может удалить", ephemeral=True)
                 return
 
             row.delete_instance()
@@ -164,7 +187,7 @@ class TimerView(View):
                 return
 
             if interaction.user.id != row.author:
-                await interaction.response.send_message("❌ Удалять может только создатель таймера", ephemeral=True)
+                await interaction.response.send_message("❌ Только автор может удалить", ephemeral=True)
                 return
 
             row.delete_instance()
@@ -206,6 +229,8 @@ async def loop():
 @bot.event
 async def on_ready():
     print(f"✅ Бот запущен: {bot.user}")
+
+    load_channels()
 
     bot.add_view(SkladView())
     bot.add_view(TimerView())
