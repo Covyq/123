@@ -13,7 +13,9 @@ from discord.ui import View, Button
 db = SqliteDatabase('TimerDataBase.db')
 DSBot = Bot(intents=Intents.all())
 GUILD_ID = 1492964694577905684
-allowed_role_name = "Таймер-Мастер"  # Роль, которой разрешено менять каналы
+
+# Укажи здесь ID роли, которой разрешено менять каналы
+allowed_role_id = 123456789012345678  # <-- замените на ID вашей роли
 
 # ─── Модели ──────────────────────────────────────────────────────────────
 class TableBase(Model):
@@ -111,8 +113,8 @@ async def on_ready():
 async def setskladchannel(ctx: ApplicationContext,
     channel: Option(SlashCommandOptionType.channel, channel_types=[ChannelType.text])):
 
-    if not ctx.author.guild_permissions.administrator and allowed_role_name not in [role.name for role in ctx.author.roles]:
-        await ctx.respond(f"❌ Только админы или роль **{allowed_role_name}** могут менять канал склада.", ephemeral=True)
+    if not ctx.author.guild_permissions.administrator and allowed_role_id not in [role.id for role in ctx.author.roles]:
+        await ctx.respond(f"❌ Только админы или роль с ID {allowed_role_id} могут менять канал склада.", ephemeral=True)
         return
 
     with db:
@@ -125,8 +127,8 @@ async def setskladchannel(ctx: ApplicationContext,
 async def setsimplechannel(ctx: ApplicationContext,
     channel: Option(SlashCommandOptionType.channel, channel_types=[ChannelType.text])):
 
-    if not ctx.author.guild_permissions.administrator and allowed_role_name not in [role.name for role in ctx.author.roles]:
-        await ctx.respond(f"❌ Только админы или роль **{allowed_role_name}** могут менять канал таймеров.", ephemeral=True)
+    if not ctx.author.guild_permissions.administrator and allowed_role_id not in [role.id for role in ctx.author.roles]:
+        await ctx.respond(f"❌ Только админы или роль с ID {allowed_role_id} могут менять канал таймеров.", ephemeral=True)
         return
 
     with db:
@@ -218,17 +220,17 @@ async def on_button_clicked(interaction: Interaction):
                     Table_SkladTimer.channel_id == interaction.channel.id,
                     Table_SkladTimer.message_id == interaction.message.id
                 )
-                new_end = int(datetime.datetime.now().timestamp()) + (timer.time_end - int(datetime.datetime.now().timestamp()))
-                timer.time_end = new_end
+                # Добавляем время с сохранением time_end
+                timer.time_end = int(datetime.datetime.now().timestamp()) + 2*24*3600 + 3600
                 timer.save()
-                await interaction.message.edit(content=f"{timer.text}\n⏰ — <t:{new_end}:R>")
+                await interaction.message.edit(content=f"{timer.text}\n⏰ — <t:{timer.time_end}:R>")
                 await interaction.response.send_message("✅ Таймер обновлён!", ephemeral=True)
             except Table_SkladTimer.DoesNotExist:
                 await interaction.response.send_message("⚠️ Таймер не найден", ephemeral=True)
 
 DSBot.add_listener(on_button_clicked, "on_interaction")
 
-# ─── Очистка при ручном удалении ───────────────────────────────────────────
+# ─── Очистка при ручном удалении ──────────────────────────────────────────
 @DSBot.event
 async def on_message_delete(message: Message):
     with db:
@@ -240,9 +242,10 @@ async def on_message_delete(message: Message):
             except table.DoesNotExist:
                 pass
 
-# ─── Запуск ──────────────────────────────────────────────────────────────
+# ─── Запуск ─────────────────────────────────────────────────────────────
 token = os.environ.get("DISCORD_BOT_TOKEN")
 if not token:
-    print("Нет токена!")
-    exit()
+    print("ОШИБКА: Токен не найден!")
+    exit(1)
+
 DSBot.run(token)
