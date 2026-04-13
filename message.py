@@ -3,6 +3,7 @@ import datetime
 import traceback
 import discord
 from discord.ext import tasks
+from discord.ui import View, Button
 from peewee import *
 
 # ─── НАСТРОЙКИ ─────────────────────────────────────────────
@@ -23,20 +24,14 @@ class BaseModel(Model):
     class Meta:
         database = db
 
-class ChannelConfig(BaseModel):
-    channel_id = BigIntegerField()
-    type = TextField()
-
-class Timer(BaseModel):
+class SkladTimer(BaseModel):
     channel_id = BigIntegerField()
     message_id = BigIntegerField()
     text = TextField()
     time_end = BigIntegerField()
-    author = TextField()
-    created = BigIntegerField()
 
 db.connect(reuse_if_open=True)
-db.create_tables([ChannelConfig, Timer])
+db.create_tables([SkladTimer])
 
 # ─── УТИЛИТЫ ───────────────────────────────────────────────
 def has_access(member):
@@ -45,160 +40,88 @@ def has_access(member):
         any(r.id == allowed_role_id for r in member.roles)
     )
 
-def set_channel(guild_id, channel_id, type_):
-    row = ChannelConfig.get_or_none(
-        (ChannelConfig.guild_id == guild_id) &
-        (ChannelConfig.type == type_)
-    )
-    if row:
-        row.channel_id = channel_id
-        row.save()
-    else:
-        ChannelConfig.create(
-            guild_id=guild_id,
-            channel_id=channel_id,
-            type=type_
-        )
+# ─── КНОПКА ────────────────────────────────────────────────
+class SkladView(View):
+    def __init__(self):
+        super().__init__(timeout=None)
 
-def get_channel(guild_id, type_):
-    row = ChannelConfig.get_or_none(
-        (ChannelConfig.guild_id == guild_id) &
-        (ChannelConfig.type == type_)
-    )
-    return row.channel_id if row else None
+    @discord.ui.button(label="Обновить склад", style=discord.ButtonStyle.green)
+    async def update(self, button: Button, interaction: discord.Interaction):
 
-# ─── LOOP ─────────────────────────────────────────────────
-@tasks.loop(seconds=5)
-async def timer_loop():
-    try:
-        now = int(datetime.datetime.utcnow().timestamp())
-        timers = list(Timer.select().where(Timer.time_end < now))
+        try:
+            row = SkladTimer.get_or_none(SkladTimer.message_id == interaction.message.id)
+            if not row:
+                await interaction.response.send_message("❌ Не найден склад", ephemeral=True)
+                return
 
-        for t in timers:
-            guild = bot.get_guild(t.guild_id)
-            if not guild:
-                continue
+            now = datetime.datetime.utcnow()
+            new_end = int((now + datetime.timedelta(hours=48)).timestamp())
 
-            channel = guild.get_channel(t.channel_id)
-            if not channel:
-                continue
+            row.time_end = new_end
+            row.save()
 
-            try:
-                msg = await channel.fetch_message(t.message_id)
-                await msg.edit(content=f"✅ {t.text}\n⏰ Завершено")
-            except:
-                pass
+            await interaction.message.edit(
+                content=f"{row.text}\n⏰ Обновлено: <t:{new_end}:R>",
+                view=self
+            )
 
-            t.delete_instance()
+            await interaction.response.send_message("✅ Склад обновлён на 48 часов", ephemeral=True)
 
-    except Exception:
-        print(traceback.format_exc())
+        except Exception:
+            print(traceback.format_exc())
+            await interaction.response.send_message("❌ Ошибка", ephemeral=True)
 
 # ─── READY ────────────────────────────────────────────────
 @bot.event
 async def on_ready():
     print(f"✅ Бот запущен: {bot.user}")
 
-    if not timer_loop.is_running():
-        timer_loop.start()
+# ─── /СКЛАД ────────────────────────────────────────────────
+@bot.slash_command(name="склад", guild_ids=[GUILD_ID])
+async def sklad(
+    ctx,
+    гекс: str,
+    регион: str,
+    склад: str,
+    пароль: str
+):
 
     try:
-        await bot.sync_commands(guild_ids=[GUILD_ID])
-        print("✅ Slash-команды синхронизированы")
+        if not has_access(ctx.author):
+            await ctx.respond("❌ Нет прав", ephemeral=True)
+            return
+
+        now = datetime.datetime.utcnow()
+        end = int((now + datetime.timedelta(hours=48)).timestamp())
+
+        text = (
+            f"👤 {ctx.author.display_name}\n"
+            f"**Гекс:** {гекс}\n"
+            f"**Регион:** {регион}\n"
+            f"**Склад:** {склад}\n"
+            f"**Пароль:** {пароль}"
+        )
+
+        view = SkladView()
+
+        msg = await ctx.send(
+            content=f"{text}\n⏰ Через 48 часов: <t:{end}:R>",
+            view=view
+        )
+
+        SkladTimer.create(
+            guild_id=ctx.guild.id,
+            channel_id=ctx.channel.id,
+            message_id=msg.id,
+            text=text,
+            time_end=end
+        )
+
+        await ctx.respond("✅ Склад создан", ephemeral=True)
+
     except Exception:
-        print("❌ SYNC ERROR")
         print(traceback.format_exc())
-
-    print("GUILDS:", [(g.name, g.id) for g in bot.guilds])
-
-# ─── TEST ────────────────────────────────────────────────
-@bot.slash_command(name="ping", guild_ids=[GUILD_ID])
-async def ping(ctx):
-    await ctx.respond("🏓 pong")
-
-# ─── КАНАЛЫ ───────────────────────────────────────────────
-@bot.slash_command(name="setskladchannel", guild_ids=[GUILD_ID])
-async def setskladchannel(ctx, channel: discord.TextChannel):
-    if not has_access(ctx.author):
-        await ctx.respond("❌ Нет прав", ephemeral=True)
-        return
-
-    set_channel(ctx.guild.id, channel.id, "sklad")
-    await ctx.respond(f"✅ Склад: {channel.mention}", ephemeral=True)
-
-
-@bot.slash_command(name="setsimplechannel", guild_ids=[GUILD_ID])
-async def setsimplechannel(ctx, channel: discord.TextChannel):
-    if not has_access(ctx.author):
-        await ctx.respond("❌ Нет прав", ephemeral=True)
-        return
-
-    set_channel(ctx.guild.id, channel.id, "simple")
-    await ctx.respond(f"✅ Таймер: {channel.mention}", ephemeral=True)
-
-# ─── СКЛАД ────────────────────────────────────────────────
-@bot.slash_command(name="склад", guild_ids=[GUILD_ID])
-async def sklad(ctx,
-    hex_val: str,
-    region: str,
-    warehouse: str,
-    password: str):
-
-    channel_id = get_channel(ctx.guild.id, "sklad")
-    if channel_id and ctx.channel.id != channel_id:
-        await ctx.respond("❌ Не тот канал", ephemeral=True)
-        return
-
-    now = datetime.datetime.utcnow()
-    end = int((now + datetime.timedelta(days=2)).timestamp())
-
-    text = (
-        f"👤 {ctx.author.display_name}\n"
-        f"**Гекс:** {hex_val}\n"
-        f"**Регион:** {region}\n"
-        f"**Склад:** {warehouse}\n"
-        f"**Пароль:** {password}"
-    )
-
-    msg = await ctx.send(f"{text}\n⏰ <t:{end}:R>")
-
-    Timer.create(
-        guild_id=ctx.guild.id,
-        channel_id=ctx.channel.id,
-        message_id=msg.id,
-        text=text,
-        time_end=end,
-        author=ctx.author.display_name,
-        created=int(now.timestamp())
-    )
-
-    await ctx.respond("✅ Создано", ephemeral=True)
-
-# ─── ТАЙМЕР ───────────────────────────────────────────────
-@bot.slash_command(name="таймер", guild_ids=[GUILD_ID])
-async def timer(ctx, text: str, seconds: int):
-
-    channel_id = get_channel(ctx.guild.id, "simple")
-    if channel_id and ctx.channel.id != channel_id:
-        await ctx.respond("❌ Не тот канал", ephemeral=True)
-        return
-
-    now = datetime.datetime.utcnow()
-    end = int((now + datetime.timedelta(seconds=seconds)).timestamp())
-
-    msg = await ctx.send(f"⏳ {text}\n⏰ <t:{end}:R>")
-
-    Timer.create(
-        guild_id=ctx.guild.id,
-        channel_id=ctx.channel.id,
-        message_id=msg.id,
-        text=text,
-        time_end=end,
-        author=ctx.author.display_name,
-        created=int(now.timestamp())
-    )
-
-    await ctx.respond("✅ Таймер создан", ephemeral=True)
+        await ctx.respond("❌ Ошибка", ephemeral=True)
 
 # ─── ЗАПУСК ───────────────────────────────────────────────
 bot.run(os.environ.get("DISCORD_BOT_TOKEN"))
