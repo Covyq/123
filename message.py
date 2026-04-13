@@ -9,12 +9,10 @@ from peewee import *
 # ─── НАСТРОЙКИ ─────────────────────────────────────────────
 GUILD_ID = 419565206335651840
 
-# 🔥 МНОЖЕСТВО РОЛЕЙ С ДОСТУПОМ
 ALLOWED_ROLE_IDS = [
     1493199914572972032,
-    422500854910681089,
-    1224787828815171595,
-    
+    123456789012345678,
+    987654321098765432
 ]
 
 bot = discord.Bot(
@@ -24,7 +22,7 @@ bot = discord.Bot(
 
 db = SqliteDatabase("TimerDataBase.db")
 
-# ─── КЭШ КАНАЛОВ ───────────────────────────────────────────
+# ─── КЭШ ───────────────────────────────────────────────────
 CHANNEL_CACHE = {
     "sklad": {},
     "simple": {}
@@ -56,7 +54,7 @@ class Timer(BaseModel):
 db.connect(reuse_if_open=True)
 db.create_tables([ChannelConfig, Timer])
 
-# ─── ЗАГРУЗКА КАНАЛОВ ПОСЛЕ РЕСТАРТА ──────────────────────
+# ─── АВТО-ЗАГРУЗКА ─────────────────────────────────────────
 def load_channels():
     global CHANNEL_CACHE
 
@@ -68,6 +66,21 @@ def load_channels():
     for row in ChannelConfig.select():
         CHANNEL_CACHE[row.type][row.guild_id] = row.channel_id
 
+
+# ─── АВТО-ОЧИСТКА БАЗЫ ─────────────────────────────────────
+def clean_channels():
+    print("🧹 Cleaning invalid channels...")
+
+    for row in ChannelConfig.select():
+        guild = bot.get_guild(row.guild_id)
+
+        if not guild:
+            row.delete_instance()
+            continue
+
+        if guild.get_channel(row.channel_id) is None:
+            print(f"🗑 Removing dead channel: {row.channel_id}")
+            row.delete_instance()
 
 # ─── ПРАВА ────────────────────────────────────────────────
 def has_access(member):
@@ -97,7 +110,17 @@ def set_channel(guild_id, channel_id, type_):
 
 
 def get_channel(guild_id, type_):
-    return CHANNEL_CACHE.get(type_, {}).get(guild_id)
+    channel_id = CHANNEL_CACHE.get(type_, {}).get(guild_id)
+
+    if not channel_id:
+        return None
+
+    guild = bot.get_guild(guild_id)
+
+    if guild and guild.get_channel(channel_id) is None:
+        return None
+
+    return channel_id
 
 # ─── VIEW СКЛАД ───────────────────────────────────────────
 class SkladView(View):
@@ -231,7 +254,8 @@ async def loop():
 async def on_ready():
     print(f"✅ Бот запущен: {bot.user}")
 
-    load_channels()
+    clean_channels()   # 🔥 авто-очистка БД
+    load_channels()    # 🔥 загрузка в кэш
 
     bot.add_view(SkladView())
     bot.add_view(TimerView())
