@@ -31,12 +31,11 @@ class ChannelConfig(BaseModel):
 
 
 class Timer(BaseModel):
-    guild_id = BigIntegerField()
     channel_id = BigIntegerField()
     message_id = BigIntegerField()
     text = TextField()
     time_end = BigIntegerField()
-    author = BigIntegerField()  # ID автора
+    author = BigIntegerField()
 
 
 db.connect(reuse_if_open=True)
@@ -80,12 +79,16 @@ class SkladView(View):
 
     @discord.ui.button(label="Обновить склад", style=discord.ButtonStyle.green)
     async def update(self, button: Button, interaction: discord.Interaction):
-
         try:
             row = Timer.get_or_none(Timer.message_id == interaction.message.id)
 
             if not row:
                 await interaction.response.send_message("❌ Склад не найден", ephemeral=True)
+                return
+
+            # 🔒 защита — только автор
+            if interaction.user.id != row.author:
+                await interaction.response.send_message("❌ Не твой склад", ephemeral=True)
                 return
 
             new_end = int((datetime.datetime.utcnow() + datetime.timedelta(hours=48)).timestamp())
@@ -104,7 +107,7 @@ class SkladView(View):
             await interaction.response.send_message("❌ Ошибка", ephemeral=True)
 
 # ─── LOOP ─────────────────────────────────────────────────
-@tasks.loop(seconds=5)
+@tasks.loop(seconds=30)
 async def loop():
     now = int(datetime.datetime.utcnow().timestamp())
 
@@ -124,11 +127,11 @@ async def loop():
             msg = await channel.fetch_message(t.message_id)
 
             await msg.edit(
-                content=f"✅ **{t.text}** завершён {mention}"
+                content=f"✅ **{t.text}** завершён {mention}\n⏰ Закончен: <t:{now}:R>"
             )
 
         except Exception:
-            pass
+            print(traceback.format_exc())
 
         t.delete_instance()
 
@@ -136,6 +139,9 @@ async def loop():
 @bot.event
 async def on_ready():
     print(f"✅ Бот запущен: {bot.user}")
+
+    # 🔥 восстановление кнопок после рестарта
+    bot.add_view(SkladView())
 
     if not loop.is_running():
         loop.start()
@@ -171,6 +177,10 @@ async def timer(
     hours: int = 0,
     minutes: int = 0
 ):
+    # ❌ проверка на нулевое время
+    if days == 0 and hours == 0 and minutes == 0:
+        await ctx.respond("❌ Укажи время", ephemeral=True)
+        return
 
     channel_id = get_channel(ctx.guild.id, "simple")
     if channel_id and ctx.channel.id != channel_id:
