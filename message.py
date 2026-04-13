@@ -79,7 +79,7 @@ class SkladView(View):
         try:
             row = Timer.get_or_none(Timer.message_id == interaction.message.id)
             if not row:
-                await interaction.response.send_message("❌ Не найден склад", ephemeral=True)
+                await interaction.response.send_message("❌ Склад не найден", ephemeral=True)
                 return
 
             new_end = int((datetime.datetime.utcnow() + datetime.timedelta(hours=48)).timestamp())
@@ -91,10 +91,11 @@ class SkladView(View):
                 view=self
             )
 
-            await interaction.response.send_message("✅ Обновлено", ephemeral=True)
+            await interaction.response.send_message("✅ Склад обновлён", ephemeral=True)
 
         except Exception:
             print(traceback.format_exc())
+            await interaction.response.send_message("❌ Ошибка кнопки", ephemeral=True)
 
 # ─── LOOP ─────────────────────────────────────────────────
 @tasks.loop(seconds=5)
@@ -131,25 +132,42 @@ async def on_ready():
     if not timer_loop.is_running():
         timer_loop.start()
 
-# ─── SET CHANNELS ─────────────────────────────────────────
+# ─── КАНАЛЫ ───────────────────────────────────────────────
 @bot.slash_command(name="setskladchannel", guild_ids=[GUILD_ID])
 async def setskladchannel(ctx, channel: discord.TextChannel):
+
     if not has_access(ctx.author):
         await ctx.respond("❌ Нет прав", ephemeral=True)
         return
 
     set_channel(ctx.guild.id, channel.id, "sklad")
-    await ctx.respond("✅ Склад канал установлен", ephemeral=True)
+    await ctx.respond(f"✅ Склад канал: {channel.mention}", ephemeral=True)
 
 
 @bot.slash_command(name="setsimpletimerchannel", guild_ids=[GUILD_ID])
-async def setsimple(ctx, channel: discord.TextChannel):
+async def setsimpletimerchannel(
+    ctx,
+    channel: discord.TextChannel,
+    days: int = 0,
+    hours: int = 0,
+    minutes: int = 0
+):
+
     if not has_access(ctx.author):
         await ctx.respond("❌ Нет прав", ephemeral=True)
         return
 
     set_channel(ctx.guild.id, channel.id, "simple")
-    await ctx.respond("✅ Канал таймеров установлен", ephemeral=True)
+
+    now = datetime.datetime.utcnow()
+    end = now + datetime.timedelta(days=days, hours=hours, minutes=minutes)
+    end_ts = int(end.timestamp())
+
+    await ctx.respond(
+        f"✅ Канал установлен: {channel.mention}\n"
+        f"⏱ Пример времени: <t:{end_ts}:R>",
+        ephemeral=True
+    )
 
 # ─── /СКЛАД ───────────────────────────────────────────────
 @bot.slash_command(name="склад", guild_ids=[GUILD_ID])
@@ -171,7 +189,10 @@ async def sklad(ctx, гекс: str, регион: str, склад: str, паро
 
     view = SkladView()
 
-    msg = await ctx.send(f"{text}\n⏰ 48 часов (<t:{end}:R>)", view=view)
+    msg = await ctx.send(
+        content=f"{text}\n\n⏰ 48 часов (<t:{end}:R>)",
+        view=view
+    )
 
     Timer.create(
         guild_id=ctx.guild.id,
