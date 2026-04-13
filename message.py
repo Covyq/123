@@ -86,10 +86,6 @@ def set_channel(guild_id, channel_id, type_):
             type=type_
         )
 
-    # 🔥 обновляем кэш
-    if guild_id not in CHANNEL_CACHE[type_]:
-        CHANNEL_CACHE[type_] = {}
-
     CHANNEL_CACHE[type_][guild_id] = channel_id
 
 
@@ -126,8 +122,6 @@ class SkladView(View):
             if not row:
                 await interaction.response.send_message("❌ Склад не найден", ephemeral=True)
                 return
-
-            # ✅ любой может обновлять
 
             new_end = int((datetime.datetime.utcnow() + datetime.timedelta(hours=48)).timestamp())
             row.time_end = new_end
@@ -268,19 +262,25 @@ async def timer(ctx, название: str, days: int = 0, hours: int = 0, minut
         await ctx.respond("❌ Укажи время", ephemeral=True)
         return
 
+    channel_id = get_channel(ctx.guild.id, "simple")
+
+    if channel_id is None:
+        await ctx.respond("❌ Канал для таймеров не настроен", ephemeral=True)
+        return
+
+    if ctx.channel.id != channel_id:
+        await ctx.respond("❌ Таймер можно создавать только в назначенном канале", ephemeral=True)
+        return
+
     end = datetime.datetime.utcnow() + datetime.timedelta(days=days, hours=hours, minutes=minutes)
     end_ts = int(end.timestamp())
 
-    try:
-        msg = await ctx.send(
-            f"⏳ **{название}**\n"
-            f"👤 Создал: {ctx.author.mention}\n"
-            f"⏰ <t:{end_ts}:R>",
-            view=TimerView()
-        )
-    except discord.Forbidden:
-        await ctx.respond("❌ Нет доступа к каналу", ephemeral=True)
-        return
+    msg = await ctx.send(
+        f"👤 Создал: {ctx.author.mention}\n"
+        f"📌 {название}\n"
+        f"⏰ <t:{end_ts}:R>",
+        view=TimerView()
+    )
 
     Timer.create(
         guild_id=ctx.guild.id,
