@@ -11,7 +11,7 @@ from discord.ui import View, Button
 
 db = SqliteDatabase('TimerDataBase.db')
 DSBot = Bot(intents=Intents.all())
-GUILD_ID = 1278259070666801214
+GUILD_ID = 1492964694577905684
 
 # ─── Модели ─────────────────────────────────────────────────────────────────── 
 class TableBase(Model):
