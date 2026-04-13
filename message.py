@@ -12,9 +12,9 @@ from discord.ui import View, Button
 # ─── Настройки ────────────────────────────────────────────────
 db = SqliteDatabase('TimerDataBase.db')
 DSBot = Bot(intents=Intents.all())
-GUILD_ID = 1492964694577905684
+GUILD_ID = 419565206335651840
 
-allowed_role_id = 123456789012345678  # вставь сюда ID роли
+allowed_role_id = 1493199914572972032  # вставь сюда ID роли
 
 # ─── Модели ─────────────────────────────────────────────────
 class TableBase(Model):
