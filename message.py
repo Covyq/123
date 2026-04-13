@@ -105,11 +105,16 @@ async def on_ready():
 
     try:
         synced = await bot.sync_commands(guild_ids=[GUILD_ID])
-        print(f"✅ Slash-команды: {len(synced)}")
+
+        if synced is None:
+            print("⚠️ Команды синхронизированы (None returned)")
+        else:
+            print(f"✅ Slash-команды: {len(synced)}")
+
     except Exception:
         print("SYNC ERROR:")
+        import traceback
         print(traceback.format_exc())
-
 # ─── ПРОВЕРКА ─────────────────────────────────────────────
 @bot.slash_command(name="ping", guild_ids=[GUILD_ID])
 async def ping(ctx):
