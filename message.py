@@ -8,7 +8,13 @@ from peewee import *
 
 # ─── НАСТРОЙКИ ─────────────────────────────────────────────
 GUILD_ID = 419565206335651840
-ALLOWED_ROLE_ID = 1493199914572972032
+
+# 🔥 МНОЖЕСТВО РОЛЕЙ С ДОСТУПОМ
+ALLOWED_ROLE_IDS = [
+    1493199914572972032,
+    123456789012345678,
+    987654321098765432
+]
 
 bot = discord.Bot(
     intents=discord.Intents.all(),
@@ -66,7 +72,7 @@ def load_channels():
 def has_access(member):
     return (
         member.guild_permissions.administrator or
-        any(r.id == ALLOWED_ROLE_ID for r in member.roles)
+        any(r.id in ALLOWED_ROLE_IDS for r in member.roles)
     )
 
 # ─── КАНАЛЫ ───────────────────────────────────────────────
