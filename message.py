@@ -1,30 +1,32 @@
 import os
 import datetime
-from peewee import *
+import traceback
 import discord
+from peewee import *
 from discord.ext import tasks
-from discord.ui import View, Button
 from discord.errors import NotFound, Forbidden, HTTPException
 
 # ─── НАСТРОЙКИ ─────────────────────────────────────────────
 GUILD_ID = 419565206335651840
 allowed_role_id = 1493199914572972032
 
-intents = discord.Intents.all()
-
 bot = discord.Bot(
-    intents=intents,
-    debug_guilds=[GUILD_ID]  # 🔥 ключ к мгновенным slash-командам
+    intents=discord.Intents.all(),
+    debug_guilds=[GUILD_ID]
 )
 
-db = SqliteDatabase('TimerDataBase.db')
+db = SqliteDatabase("TimerDataBase.db")
 
-# ─── БАЗА ──────────────────────────────────────────────────
+# ─── БАЗА ДАННЫХ ───────────────────────────────────────────
 class BaseModel(Model):
     guild_id = BigIntegerField()
 
     class Meta:
         database = db
+
+class ChannelConfig(BaseModel):
+    channel_id = BigIntegerField()
+    type = TextField()
 
 class Timer(BaseModel):
     channel_id = BigIntegerField()
@@ -34,11 +36,9 @@ class Timer(BaseModel):
     author = TextField()
     created = BigIntegerField()
 
-class ChannelConfig(BaseModel):
-    channel_id = BigIntegerField()
-    type = TextField()  # "sklad" или "simple"
-
-db.create_tables([Timer, ChannelConfig])
+# 🔥 ОБЯЗАТЕЛЬНО безопасная инициализация БД
+db.connect(reuse_if_open=True)
+db.create_tables([ChannelConfig, Timer])
 
 # ─── УТИЛИТЫ ───────────────────────────────────────────────
 def has_access(member):
@@ -46,13 +46,6 @@ def has_access(member):
         member.guild_permissions.administrator or
         any(r.id == allowed_role_id for r in member.roles)
     )
-
-def get_channel(guild_id, type_):
-    row = ChannelConfig.get_or_none(
-        (ChannelConfig.guild_id == guild_id) &
-        (ChannelConfig.type == type_)
-    )
-    return row.channel_id if row else None
 
 def set_channel(guild_id, channel_id, type_):
     row = ChannelConfig.get_or_none(
@@ -69,91 +62,137 @@ def set_channel(guild_id, channel_id, type_):
             type=type_
         )
 
-# ─── LOOP ─────────────────────────────────────────────────
+def get_channel(guild_id, type_):
+    row = ChannelConfig.get_or_none(
+        (ChannelConfig.guild_id == guild_id) &
+        (ChannelConfig.type == type_)
+    )
+    return row.channel_id if row else None
+
+# ─── ФОНОВЫЙ ЦИКЛ ─────────────────────────────────────────
 @tasks.loop(seconds=5)
 async def timer_loop():
-    now = int(datetime.datetime.utcnow().timestamp())
+    try:
+        now = int(datetime.datetime.utcnow().timestamp())
+        timers = list(Timer.select().where(Timer.time_end < now))
 
-    timers = list(Timer.select().where(Timer.time_end < now))
+        for t in timers:
+            guild = bot.get_guild(t.guild_id)
+            if not guild:
+                continue
 
-    for t in timers:
-        guild = bot.get_guild(t.guild_id)
-        if not guild:
-            continue
+            channel = guild.get_channel(t.channel_id)
+            if not channel:
+                continue
 
-        channel = guild.get_channel(t.channel_id)
-        if not channel:
-            continue
+            try:
+                msg = await channel.fetch_message(t.message_id)
+                await msg.edit(content=f"✅ {t.text}\n⏰ Завершено")
+            except (NotFound, Forbidden, HTTPException):
+                pass
 
-        try:
-            msg = await channel.fetch_message(t.message_id)
-            await msg.edit(content=f"✅ {t.text}\n⏰ Завершено")
-        except (NotFound, Forbidden, HTTPException):
-            pass
+            t.delete_instance()
 
-        t.delete_instance()
+    except Exception:
+        print("❌ LOOP ERROR:")
+        print(traceback.format_exc())
 
 # ─── READY ────────────────────────────────────────────────
 @bot.event
 async def on_ready():
     print(f"✅ Бот {bot.user} запущен")
 
-    print("Серверы:", [g.id for g in bot.guilds])
-
     if not timer_loop.is_running():
         timer_loop.start()
 
     try:
         synced = await bot.sync_commands(guild_ids=[GUILD_ID])
-        print(f"✅ Команд синхронизировано: {len(synced)}")
-    except Exception as e:
-        print(f"❌ Ошибка sync: {e}")
+        print(f"✅ Slash-команды: {len(synced)}")
+    except Exception:
+        print("❌ SYNC ERROR:")
+        print(traceback.format_exc())
 
-# ─── КОМАНДЫ ──────────────────────────────────────────────
+# ─── КНОПКИ ───────────────────────────────────────────────
+@bot.event
+async def on_interaction(interaction: discord.Interaction):
+    if interaction.type == discord.InteractionType.component:
+        if interaction.data.get("custom_id") == "update_timer":
+            await interaction.response.send_message(
+                "🔄 Пока не реализовано",
+                ephemeral=True
+            )
 
-@bot.slash_command(name="ping", description="Проверка")
-async def ping(ctx):
-    await ctx.respond("🏓 Pong!")
-
-@bot.slash_command(name="setchannel", description="Установить канал", guild_ids=[GUILD_ID])
-async def setchannel(ctx,
-    channel: discord.Option(discord.SlashCommandOptionType.channel),
-    type: discord.Option(str, choices=["sklad", "simple"])
+# ─── /setskladchannel ─────────────────────────────────────
+@bot.slash_command(name="setskladchannel", guild_ids=[GUILD_ID])
+async def setskladchannel(ctx,
+    channel: discord.Option(discord.SlashCommandOptionType.channel)
 ):
-    if not has_access(ctx.author):
-        await ctx.respond("❌ Нет прав", ephemeral=True)
-        return
+    try:
+        if not has_access(ctx.author):
+            await ctx.respond("❌ Нет прав", ephemeral=True)
+            return
 
-    set_channel(ctx.guild.id, channel.id, type)
-    await ctx.respond("✅ Канал установлен", ephemeral=True)
+        set_channel(ctx.guild.id, channel.id, "sklad")
 
-@bot.slash_command(name="таймер", description="Создать таймер", guild_ids=[GUILD_ID])
+        await ctx.respond(f"✅ Канал склада: {channel.mention}", ephemeral=True)
+
+    except Exception:
+        print(traceback.format_exc())
+        await ctx.respond("❌ Ошибка команды", ephemeral=True)
+
+# ─── /setsimplechannel ────────────────────────────────────
+@bot.slash_command(name="setsimplechannel", guild_ids=[GUILD_ID])
+async def setsimplechannel(ctx,
+    channel: discord.Option(discord.SlashCommandOptionType.channel)
+):
+    try:
+        if not has_access(ctx.author):
+            await ctx.respond("❌ Нет прав", ephemeral=True)
+            return
+
+        set_channel(ctx.guild.id, channel.id, "simple")
+
+        await ctx.respond(f"✅ Канал таймеров: {channel.mention}", ephemeral=True)
+
+    except Exception:
+        print(traceback.format_exc())
+        await ctx.respond("❌ Ошибка команды", ephemeral=True)
+
+# ─── /таймер ──────────────────────────────────────────────
+@bot.slash_command(name="таймер", guild_ids=[GUILD_ID])
 async def timer(ctx,
     text: discord.Option(str),
     seconds: discord.Option(int)
 ):
-    channel_id = get_channel(ctx.guild.id, "simple")
-    if channel_id and ctx.channel.id != channel_id:
-        await ctx.respond("❌ Не тот канал", ephemeral=True)
-        return
+    try:
+        channel_id = get_channel(ctx.guild.id, "simple")
+        if channel_id and ctx.channel.id != channel_id:
+            await ctx.respond("❌ Не тот канал", ephemeral=True)
+            return
 
-    now = datetime.datetime.utcnow()
-    created = int(now.timestamp())
-    end = int((now + datetime.timedelta(seconds=seconds)).timestamp())
+        now = datetime.datetime.utcnow()
+        created = int(now.timestamp())
+        end = int((now + datetime.timedelta(seconds=seconds)).timestamp())
 
-    msg = await ctx.send(f"⏳ {text}\n⏰ <t:{end}:R>")
+        msg = await ctx.send(
+            f"⏳ {text}\n⏰ <t:{end}:R>"
+        )
 
-    Timer.create(
-        guild_id=ctx.guild.id,
-        channel_id=ctx.channel.id,
-        message_id=msg.id,
-        text=text,
-        time_end=end,
-        author=ctx.author.display_name,
-        created=created
-    )
+        Timer.create(
+            guild_id=ctx.guild.id,
+            channel_id=ctx.channel.id,
+            message_id=msg.id,
+            text=text,
+            time_end=end,
+            author=ctx.author.display_name,
+            created=created
+        )
 
-    await ctx.respond("✅ Таймер создан", ephemeral=True)
+        await ctx.respond("✅ Таймер создан", ephemeral=True)
+
+    except Exception:
+        print(traceback.format_exc())
+        await ctx.respond("❌ Ошибка таймера", ephemeral=True)
 
 # ─── ЗАПУСК ───────────────────────────────────────────────
 bot.run(os.environ.get("DISCORD_BOT_TOKEN"))
