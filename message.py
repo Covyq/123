@@ -1,53 +1,44 @@
 import os
 import datetime
 from peewee import *
-from discord import (
-    Bot, Intents, ApplicationContext, Option, SlashCommandOptionType,
-    Interaction, InteractionType, ButtonStyle, ChannelType, HTTPException
-)
-from discord.ui import View, Button
+import discord
 from discord.ext import tasks
-from discord.errors import NotFound, Forbidden
+from discord.ui import View, Button
+from discord.errors import NotFound, Forbidden, HTTPException
 
 # ─── НАСТРОЙКИ ─────────────────────────────────────────────
 GUILD_ID = 419565206335651840
 allowed_role_id = 1493199914572972032
 
-bot = Bot(
-    intents=Intents.all(),
-    debug_guilds=[GUILD_ID]  # 🔥 важно для slash-команд
+intents = discord.Intents.all()
+
+bot = discord.Bot(
+    intents=intents,
+    debug_guilds=[GUILD_ID]  # 🔥 ключ к мгновенным slash-командам
 )
 
 db = SqliteDatabase('TimerDataBase.db')
 
-# ─── БАЗА ДАННЫХ ───────────────────────────────────────────
+# ─── БАЗА ──────────────────────────────────────────────────
 class BaseModel(Model):
     guild_id = BigIntegerField()
 
     class Meta:
         database = db
 
-class SkladTimer(BaseModel):
+class Timer(BaseModel):
     channel_id = BigIntegerField()
     message_id = BigIntegerField()
     text = TextField()
     time_end = BigIntegerField()
+    author = TextField()
+    created = BigIntegerField()
 
-class SimpleTimer(BaseModel):
+class ChannelConfig(BaseModel):
     channel_id = BigIntegerField()
-    message_id = BigIntegerField()
-    text = TextField()
-    time_end = BigIntegerField()
-    author_name = TextField()
-    created_at = BigIntegerField()
+    type = TextField()  # "sklad" или "simple"
 
-class SkladChannel(BaseModel):
-    channel_id = BigIntegerField()
-
-class SimpleChannel(BaseModel):
-    channel_id = BigIntegerField()
-
-db.create_tables([SkladTimer, SimpleTimer, SkladChannel, SimpleChannel])
+db.create_tables([Timer, ChannelConfig])
 
 # ─── УТИЛИТЫ ───────────────────────────────────────────────
 def has_access(member):
@@ -56,36 +47,36 @@ def has_access(member):
         any(r.id == allowed_role_id for r in member.roles)
     )
 
-def format_sklad_text(author, hex_val, region, warehouse, password):
-    return (
-        f"👤 {author}\n"
-        f"**Гекс:** {hex_val}\n"
-        f"**Регион:** {region}\n"
-        f"**Склад:** {warehouse}\n"
-        f"**Пароль:** {password}"
+def get_channel(guild_id, type_):
+    row = ChannelConfig.get_or_none(
+        (ChannelConfig.guild_id == guild_id) &
+        (ChannelConfig.type == type_)
     )
-
-def get_channel(table, guild_id):
-    row = table.get_or_none(table.guild_id == guild_id)
     return row.channel_id if row else None
 
-def set_channel(table, guild_id, channel_id):
-    row = table.get_or_none(table.guild_id == guild_id)
+def set_channel(guild_id, channel_id, type_):
+    row = ChannelConfig.get_or_none(
+        (ChannelConfig.guild_id == guild_id) &
+        (ChannelConfig.type == type_)
+    )
     if row:
         row.channel_id = channel_id
         row.save()
     else:
-        table.create(guild_id=guild_id, channel_id=channel_id)
+        ChannelConfig.create(
+            guild_id=guild_id,
+            channel_id=channel_id,
+            type=type_
+        )
 
 # ─── LOOP ─────────────────────────────────────────────────
-@tasks.loop(seconds=6)
+@tasks.loop(seconds=5)
 async def timer_loop():
     now = int(datetime.datetime.utcnow().timestamp())
 
-    sklad = list(SkladTimer.select().where(SkladTimer.time_end < now))
-    simple = list(SimpleTimer.select().where(SimpleTimer.time_end < now))
+    timers = list(Timer.select().where(Timer.time_end < now))
 
-    for t in sklad:
+    for t in timers:
         guild = bot.get_guild(t.guild_id)
         if not guild:
             continue
@@ -96,25 +87,7 @@ async def timer_loop():
 
         try:
             msg = await channel.fetch_message(t.message_id)
-            await msg.delete()
-        except (NotFound, Forbidden, HTTPException):
-            pass
-
-        t.delete_instance()
-
-    for t in simple:
-        guild = bot.get_guild(t.guild_id)
-        if not guild:
-            continue
-
-        channel = guild.get_channel(t.channel_id)
-        if not channel:
-            continue
-
-        try:
-            msg = await channel.fetch_message(t.message_id)
-            header = f"👤 {t.author_name} · <t:{t.created_at}:t>"
-            await msg.edit(content=f"✅ {header}\n{t.text}\n✅ Готово")
+            await msg.edit(content=f"✅ {t.text}\n⏰ Завершено")
         except (NotFound, Forbidden, HTTPException):
             pass
 
@@ -125,121 +98,59 @@ async def timer_loop():
 async def on_ready():
     print(f"✅ Бот {bot.user} запущен")
 
+    print("Серверы:", [g.id for g in bot.guilds])
+
     if not timer_loop.is_running():
         timer_loop.start()
 
     try:
-        await bot.sync_commands(guild_ids=[GUILD_ID])
-        print("✅ Slash-команды готовы")
+        synced = await bot.sync_commands(guild_ids=[GUILD_ID])
+        print(f"✅ Команд синхронизировано: {len(synced)}")
     except Exception as e:
         print(f"❌ Ошибка sync: {e}")
 
-# ─── КНОПКИ ───────────────────────────────────────────────
-@bot.event
-async def on_interaction(interaction: Interaction):
-    if interaction.type == InteractionType.component:
-        if interaction.data["custom_id"] == "update_timer":
-            await interaction.response.send_message(
-                "🔄 Пока не реализовано",
-                ephemeral=True
-            )
-
 # ─── КОМАНДЫ ──────────────────────────────────────────────
 
-@bot.slash_command(name="setskladchannel", guild_ids=[GUILD_ID])
-async def setskladchannel(ctx: ApplicationContext,
-    channel: Option(SlashCommandOptionType.channel, channel_types=[ChannelType.text])):
+@bot.slash_command(name="ping", description="Проверка")
+async def ping(ctx):
+    await ctx.respond("🏓 Pong!")
 
+@bot.slash_command(name="setchannel", description="Установить канал", guild_ids=[GUILD_ID])
+async def setchannel(ctx,
+    channel: discord.Option(discord.SlashCommandOptionType.channel),
+    type: discord.Option(str, choices=["sklad", "simple"])
+):
     if not has_access(ctx.author):
         await ctx.respond("❌ Нет прав", ephemeral=True)
         return
 
-    set_channel(SkladChannel, ctx.guild.id, channel.id)
-    await ctx.respond(f"✅ Канал склада: {channel.mention}", ephemeral=True)
+    set_channel(ctx.guild.id, channel.id, type)
+    await ctx.respond("✅ Канал установлен", ephemeral=True)
 
-
-@bot.slash_command(name="setsimplechannel", guild_ids=[GUILD_ID])
-async def setsimplechannel(ctx: ApplicationContext,
-    channel: Option(SlashCommandOptionType.channel, channel_types=[ChannelType.text])):
-
-    if not has_access(ctx.author):
-        await ctx.respond("❌ Нет прав", ephemeral=True)
-        return
-
-    set_channel(SimpleChannel, ctx.guild.id, channel.id)
-    await ctx.respond(f"✅ Канал таймеров: {channel.mention}", ephemeral=True)
-
-
-@bot.slash_command(name="склад", guild_ids=[GUILD_ID])
-async def sklad(ctx: ApplicationContext,
-    hex_val: Option(str, name="гекс"),
-    region: Option(str, name="регион"),
-    warehouse: Option(str, name="склад"),
-    password: Option(str, name="пароль")):
-
-    channel_id = get_channel(SkladChannel, ctx.guild.id)
-    if channel_id and ctx.channel.id != channel_id:
-        await ctx.respond("❌ Не тот канал", ephemeral=True)
-        return
-
-    now = datetime.datetime.utcnow()
-    time_end = int((now + datetime.timedelta(days=2, hours=1)).timestamp())
-
-    text = format_sklad_text(
-        ctx.author.display_name,
-        hex_val,
-        region,
-        warehouse,
-        password
-    )
-
-    view = View()
-    view.add_item(Button(label="Обновить", custom_id="update_timer"))
-
-    msg = await ctx.send(f"{text}\n⏰ — <t:{time_end}:R>", view=view)
-
-    SkladTimer.create(
-        guild_id=ctx.guild.id,
-        channel_id=ctx.channel.id,
-        message_id=msg.id,
-        text=text,
-        time_end=time_end
-    )
-
-    await ctx.respond("✅ Таймер создан", ephemeral=True)
-
-
-@bot.slash_command(name="таймер", guild_ids=[GUILD_ID])
-async def timer(ctx: ApplicationContext,
-    text: Option(str, name="текст"),
-    days: Option(int, default=0),
-    hours: Option(int, default=0),
-    minutes: Option(int, default=0),
-    seconds: Option(int, default=0)):
-
-    channel_id = get_channel(SimpleChannel, ctx.guild.id)
+@bot.slash_command(name="таймер", description="Создать таймер", guild_ids=[GUILD_ID])
+async def timer(ctx,
+    text: discord.Option(str),
+    seconds: discord.Option(int)
+):
+    channel_id = get_channel(ctx.guild.id, "simple")
     if channel_id and ctx.channel.id != channel_id:
         await ctx.respond("❌ Не тот канал", ephemeral=True)
         return
 
     now = datetime.datetime.utcnow()
     created = int(now.timestamp())
-    time_end = int((now + datetime.timedelta(
-        days=days, hours=hours, minutes=minutes, seconds=seconds
-    )).timestamp())
+    end = int((now + datetime.timedelta(seconds=seconds)).timestamp())
 
-    msg = await ctx.send(
-        f"⏳ 👤 {ctx.author.display_name}\n{text}\n⏰ — <t:{time_end}:R>"
-    )
+    msg = await ctx.send(f"⏳ {text}\n⏰ <t:{end}:R>")
 
-    SimpleTimer.create(
+    Timer.create(
         guild_id=ctx.guild.id,
         channel_id=ctx.channel.id,
         message_id=msg.id,
         text=text,
-        time_end=time_end,
-        author_name=ctx.author.display_name,
-        created_at=created
+        time_end=end,
+        author=ctx.author.display_name,
+        created=created
     )
 
     await ctx.respond("✅ Таймер создан", ephemeral=True)
