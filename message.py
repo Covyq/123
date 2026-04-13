@@ -213,6 +213,28 @@ async def on_ready():
         loop.start()
 
 # ─── КОМАНДЫ ──────────────────────────────────────────────
+@bot.slash_command(name="setskladchannel", guild_ids=[GUILD_ID])
+async def setskladchannel(ctx, channel: discord.TextChannel):
+
+    if not has_access(ctx.author):
+        await ctx.respond("❌ Нет прав", ephemeral=True)
+        return
+
+    set_channel(ctx.guild.id, channel.id, "sklad")
+    await ctx.respond(f"✅ Канал складов: {channel.mention}", ephemeral=True)
+
+
+@bot.slash_command(name="setsimpletimer", guild_ids=[GUILD_ID])
+async def setsimpletimer(ctx, channel: discord.TextChannel):
+
+    if not has_access(ctx.author):
+        await ctx.respond("❌ Нет прав", ephemeral=True)
+        return
+
+    set_channel(ctx.guild.id, channel.id, "simple")
+    await ctx.respond(f"✅ Канал таймеров: {channel.mention}", ephemeral=True)
+
+
 @bot.slash_command(name="таймер", guild_ids=[GUILD_ID])
 async def timer(ctx, название: str, days: int = 0, hours: int = 0, minutes: int = 0):
 
@@ -244,6 +266,45 @@ async def timer(ctx, название: str, days: int = 0, hours: int = 0, minut
     )
 
     await ctx.respond("✅ Таймер создан", ephemeral=True)
+
+
+@bot.slash_command(name="склад", guild_ids=[GUILD_ID])
+async def sklad(ctx, гекс: str, регион: str, склад: str, пароль: str):
+
+    channel_id = get_channel(ctx.guild.id, "sklad")
+    if channel_id and ctx.channel.id != channel_id:
+        await ctx.respond("❌ Не тот канал", ephemeral=True)
+        return
+
+    end_ts = int((datetime.datetime.utcnow() + datetime.timedelta(hours=48)).timestamp())
+
+    text = (
+        f"👤 {ctx.author.display_name}\n"
+        f"**Гекс:** {гекс}\n"
+        f"**Регион:** {регион}\n"
+        f"**Склад:** {склад}\n"
+        f"**Пароль:** {пароль}"
+    )
+
+    try:
+        msg = await ctx.send(
+            f"{text}\n\n⏰ 48 часов (<t:{end_ts}:R>)",
+            view=SkladView()
+        )
+    except discord.Forbidden:
+        await ctx.respond("❌ Нет доступа к каналу", ephemeral=True)
+        return
+
+    Timer.create(
+        guild_id=ctx.guild.id,
+        channel_id=ctx.channel.id,
+        message_id=msg.id,
+        text=text,
+        time_end=end_ts,
+        author=ctx.author.id
+    )
+
+    await ctx.respond("✅ Склад создан", ephemeral=True)
 
 # ─── RUN ────────────────────────────────────────────────
 bot.run(os.environ.get("DISCORD_BOT_TOKEN"))
