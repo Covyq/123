@@ -24,9 +24,11 @@ class BaseModel(Model):
     class Meta:
         database = db
 
+
 class ChannelConfig(BaseModel):
     channel_id = BigIntegerField()
     type = TextField()
+
 
 class Timer(BaseModel):
     guild_id = BigIntegerField()
@@ -34,6 +36,8 @@ class Timer(BaseModel):
     message_id = BigIntegerField()
     text = TextField()
     time_end = BigIntegerField()
+    author = BigIntegerField()  # ID автора
+
 
 db.connect(reuse_if_open=True)
 db.create_tables([ChannelConfig, Timer])
@@ -60,6 +64,7 @@ def set_channel(guild_id, channel_id, type_):
             channel_id=channel_id,
             type=type_
         )
+
 
 def get_channel(guild_id, type_):
     row = ChannelConfig.get_or_none(
@@ -92,13 +97,50 @@ class SkladView(View):
                 view=self
             )
 
-            await interaction.response.send_message("✅ Склад обновлён на 48 часов", ephemeral=True)
+            await interaction.response.send_message("✅ Склад обновлён", ephemeral=True)
 
         except Exception:
             print(traceback.format_exc())
             await interaction.response.send_message("❌ Ошибка", ephemeral=True)
 
-# ─── /SET SKLAD CHANNEL ───────────────────────────────────
+# ─── LOOP ─────────────────────────────────────────────────
+@tasks.loop(seconds=5)
+async def loop():
+    now = int(datetime.datetime.utcnow().timestamp())
+
+    for t in Timer.select().where(Timer.time_end < now):
+        try:
+            guild = bot.get_guild(t.guild_id)
+            if not guild:
+                continue
+
+            channel = guild.get_channel(t.channel_id)
+            if not channel:
+                continue
+
+            member = guild.get_member(t.author)
+            mention = member.mention if member else "пользователь"
+
+            msg = await channel.fetch_message(t.message_id)
+
+            await msg.edit(
+                content=f"✅ **{t.text}** завершён {mention}"
+            )
+
+        except Exception:
+            pass
+
+        t.delete_instance()
+
+# ─── READY ────────────────────────────────────────────────
+@bot.event
+async def on_ready():
+    print(f"✅ Бот запущен: {bot.user}")
+
+    if not loop.is_running():
+        loop.start()
+
+# ─── SET SKLAD CHANNEL ────────────────────────────────────
 @bot.slash_command(name="setskladchannel", guild_ids=[GUILD_ID])
 async def setskladchannel(ctx, channel: discord.TextChannel):
 
@@ -109,7 +151,7 @@ async def setskladchannel(ctx, channel: discord.TextChannel):
     set_channel(ctx.guild.id, channel.id, "sklad")
     await ctx.respond(f"✅ Канал складов: {channel.mention}", ephemeral=True)
 
-# ─── /SET TIMER CHANNEL ───────────────────────────────────
+# ─── SET SIMPLE TIMER CHANNEL ─────────────────────────────
 @bot.slash_command(name="setsimpletimer", guild_ids=[GUILD_ID])
 async def setsimpletimer(ctx, channel: discord.TextChannel):
 
@@ -140,7 +182,9 @@ async def timer(
     end_ts = int(end.timestamp())
 
     msg = await ctx.send(
-        f"⏳ **{название}**\n⏰ <t:{end_ts}:R>"
+        f"⏳ **{название}**\n"
+        f"👤 Создал: {ctx.author.mention}\n"
+        f"⏰ <t:{end_ts}:R>"
     )
 
     Timer.create(
@@ -148,7 +192,8 @@ async def timer(
         channel_id=ctx.channel.id,
         message_id=msg.id,
         text=название,
-        time_end=end_ts
+        time_end=end_ts,
+        author=ctx.author.id
     )
 
     await ctx.respond("✅ Таймер создан", ephemeral=True)
@@ -188,41 +233,11 @@ async def sklad(
         channel_id=ctx.channel.id,
         message_id=msg.id,
         text=text,
-        time_end=end_ts
+        time_end=end_ts,
+        author=ctx.author.id
     )
 
     await ctx.respond("✅ Склад создан", ephemeral=True)
 
-# ─── LOOP ───────────────────────────────────────────────
-@tasks.loop(seconds=5)
-async def loop():
-    now = int(datetime.datetime.utcnow().timestamp())
-
-    for t in Timer.select().where(Timer.time_end < now):
-        try:
-            guild = bot.get_guild(t.guild_id)
-            if not guild:
-                continue
-
-            channel = guild.get_channel(t.channel_id)
-            if not channel:
-                continue
-
-            msg = await channel.fetch_message(t.message_id)
-            await msg.edit(content=f"✅ {t.text}\n⏰ Завершено")
-
-        except Exception:
-            pass
-
-        t.delete_instance()
-
-# ─── READY ────────────────────────────────────────────────
-@bot.event
-async def on_ready():
-    print(f"✅ Бот запущен: {bot.user}")
-
-    if not loop.is_running():
-        loop.start()
-
-# ─── ЗАПУСК ───────────────────────────────────────────────
+# ─── RUN ────────────────────────────────────────────────
 bot.run(os.environ.get("DISCORD_BOT_TOKEN"))
