@@ -72,12 +72,16 @@ def get_channel(guild_id, type_):
     )
     return row.channel_id if row else None
 
-# ─── VIEW ДЛЯ СКЛАДА ──────────────────────────────────────
+# ─── VIEW СКЛАД ───────────────────────────────────────────
 class SkladView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="Обновить склад", style=discord.ButtonStyle.green)
+    @discord.ui.button(
+        label="Обновить склад",
+        style=discord.ButtonStyle.green,
+        custom_id="sklad_update"
+    )
     async def update(self, button: Button, interaction: discord.Interaction):
         try:
             row = Timer.get_or_none(Timer.message_id == interaction.message.id)
@@ -105,7 +109,11 @@ class SkladView(View):
             print(traceback.format_exc())
             await interaction.response.send_message("❌ Ошибка", ephemeral=True)
 
-    @discord.ui.button(label="Удалить", style=discord.ButtonStyle.red)
+    @discord.ui.button(
+        label="Удалить",
+        style=discord.ButtonStyle.red,
+        custom_id="sklad_delete"
+    )
     async def delete(self, button: Button, interaction: discord.Interaction):
         try:
             row = Timer.get_or_none(Timer.message_id == interaction.message.id)
@@ -125,12 +133,16 @@ class SkladView(View):
             print(traceback.format_exc())
             await interaction.response.send_message("❌ Ошибка", ephemeral=True)
 
-# ─── VIEW ДЛЯ ТАЙМЕРА ─────────────────────────────────────
+# ─── VIEW ТАЙМЕР ──────────────────────────────────────────
 class TimerView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="Удалить таймер", style=discord.ButtonStyle.red)
+    @discord.ui.button(
+        label="Удалить таймер",
+        style=discord.ButtonStyle.red,
+        custom_id="timer_delete"
+    )
     async def delete(self, button: Button, interaction: discord.Interaction):
         try:
             row = Timer.get_or_none(Timer.message_id == interaction.message.id)
@@ -184,6 +196,7 @@ async def loop():
 async def on_ready():
     print(f"✅ Бот запущен: {bot.user}")
 
+    # 🔥 важно для persistent view
     bot.add_view(SkladView())
     bot.add_view(TimerView())
 
@@ -234,12 +247,16 @@ async def timer(
     end = now + datetime.timedelta(days=days, hours=hours, minutes=minutes)
     end_ts = int(end.timestamp())
 
-    msg = await ctx.send(
-        f"⏳ **{название}**\n"
-        f"👤 Создал: {ctx.author.mention}\n"
-        f"⏰ <t:{end_ts}:R>",
-        view=TimerView()
-    )
+    try:
+        msg = await ctx.send(
+            f"⏳ **{название}**\n"
+            f"👤 Создал: {ctx.author.mention}\n"
+            f"⏰ <t:{end_ts}:R>",
+            view=TimerView()
+        )
+    except discord.Forbidden:
+        await ctx.respond("❌ Бот не имеет доступа к каналу", ephemeral=True)
+        return
 
     Timer.create(
         guild_id=ctx.guild.id,
@@ -277,10 +294,14 @@ async def sklad(
         f"**Пароль:** {пароль}"
     )
 
-    msg = await ctx.send(
-        f"{text}\n\n⏰ 48 часов (<t:{end_ts}:R>)",
-        view=SkladView()
-    )
+    try:
+        msg = await ctx.send(
+            f"{text}\n\n⏰ 48 часов (<t:{end_ts}:R>)",
+            view=SkladView()
+        )
+    except discord.Forbidden:
+        await ctx.respond("❌ Бот не имеет доступа к каналу", ephemeral=True)
+        return
 
     Timer.create(
         guild_id=ctx.guild.id,
