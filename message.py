@@ -166,19 +166,32 @@ async def sklad(ctx: ApplicationContext,
 
     await ctx.respond("✅ Таймер создан!", ephemeral=True)
 
-# ─── Обычный таймер ──────────────────────────────────────────────────────
+# ─── Обычный таймер (с выбором времени) ─────────────────────────────────
 @DSBot.slash_command(name="таймер", guild_ids=[GUILD_ID])
 async def timer(ctx: ApplicationContext,
-    text: Option(str),
-    minutes: Option(int, default=1)):
+    text: Option(str, name="текст", description="Текст таймера"),
+    days: Option(int, name="дни", description="Дни", default=0),
+    hours: Option(int, name="часы", description="Часы", default=0),
+    minutes: Option(int, name="минуты", description="Минуты", default=0),
+    seconds: Option(int, name="секунды", description="Секунды", default=0)):
+
+    simple_channel_id = get_channel_id(Table_SimpleChannel, ctx.guild.id)
+    if simple_channel_id and ctx.channel.id != simple_channel_id:
+        ch = ctx.guild.get_channel(simple_channel_id)
+        mention = ch.mention if ch else f"<#{simple_channel_id}>"
+        await ctx.respond(f"❌ Только в канале {mention}", ephemeral=True)
+        return
+
+    if days == 0 and hours == 0 and minutes == 0 and seconds == 0:
+        await ctx.respond("❌ Укажи хотя бы какое-то время", ephemeral=True)
+        return
 
     now = datetime.datetime.now()
     created = int(now.timestamp())
-    time_end = int((now + datetime.timedelta(minutes=minutes)).timestamp())
+    time_end = int((now + datetime.timedelta(days=days, hours=hours, minutes=minutes, seconds=seconds)).timestamp())
 
-    msg = await ctx.send(
-        f"👤 {ctx.author.display_name} · <t:{created}:t>\n{text}\n⏰ — <t:{time_end}:R>"
-    )
+    header = f"👤 {ctx.author.display_name} · создан в <t:{created}:t>"
+    msg = await ctx.send(f"{header}\n{text}\n⏰ — <t:{time_end}:R>")
 
     with db:
         Table_SimpleTimer.create(
@@ -193,27 +206,19 @@ async def timer(ctx: ApplicationContext,
 
     await ctx.respond("✅ Таймер создан!", ephemeral=True)
 
-# ─── Кнопка ──────────────────────────────────────────────────────────────
+# ─── Кнопка обновления склада ─────────────────────────────────────────────
 async def on_button_clicked(interaction: Interaction):
     if interaction.type == InteractionType.component:
         if interaction.data.get("custom_id") == "update_sklad_timer":
             try:
-                timer = Table_SkladTimer.get(
-                    Table_SkladTimer.message_id == interaction.message.id
-                )
+                timer = Table_SkladTimer.get(Table_SkladTimer.message_id == interaction.message.id)
 
                 new_end = int(datetime.datetime.now().timestamp()) + 2*24*60*60 + 3600
                 timer.time_end = new_end
                 timer.save()
 
-                await interaction.message.edit(
-                    content=f"{timer.text}\n⏰ — <t:{new_end}:R>"
-                )
-
-                await interaction.response.send_message(
-                    "✅ Продлено на 2 дня и 1 час!",
-                    ephemeral=True
-                )
+                await interaction.message.edit(content=f"{timer.text}\n⏰ — <t:{new_end}:R>")
+                await interaction.response.send_message("✅ Продлено на 2 дня и 1 час!", ephemeral=True)
 
             except Table_SkladTimer.DoesNotExist:
                 await interaction.response.send_message("Ошибка", ephemeral=True)
@@ -222,9 +227,7 @@ DSBot.add_listener(on_button_clicked, "on_interaction")
 
 # ─── Запуск ──────────────────────────────────────────────────────────────
 token = os.environ.get("DISCORD_BOT_TOKEN")
-
 if not token:
     print("Нет токена!")
     exit()
-
 DSBot.run(token)
