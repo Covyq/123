@@ -104,9 +104,7 @@ class SkladView(View):
                 await interaction.response.send_message("❌ Склад не найден", ephemeral=True)
                 return
 
-            if interaction.user.id != row.author:
-                await interaction.response.send_message("❌ Не твой склад", ephemeral=True)
-                return
+            # ✅ ОБНОВЛЕНИЕ МОЖЕТ ЛЮБОЙ
 
             new_end = int((datetime.datetime.utcnow() + datetime.timedelta(hours=48)).timestamp())
             row.time_end = new_end
@@ -117,7 +115,10 @@ class SkladView(View):
                 view=self
             )
 
-            await interaction.response.send_message("✅ Склад обновлён", ephemeral=True)
+            await interaction.response.send_message(
+                f"✅ Склад обновлён пользователем {interaction.user.mention}",
+                ephemeral=True
+            )
 
         except Exception:
             print(traceback.format_exc())
@@ -131,7 +132,7 @@ class SkladView(View):
                 return
 
             if interaction.user.id != row.author:
-                await interaction.response.send_message("❌ Не твой склад", ephemeral=True)
+                await interaction.response.send_message("❌ Удалять может только создатель склада", ephemeral=True)
                 return
 
             row.delete_instance()
@@ -163,7 +164,7 @@ class TimerView(View):
                 return
 
             if interaction.user.id != row.author:
-                await interaction.response.send_message("❌ Не твой таймер", ephemeral=True)
+                await interaction.response.send_message("❌ Удалять может только создатель таймера", ephemeral=True)
                 return
 
             row.delete_instance()
