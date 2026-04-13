@@ -72,7 +72,7 @@ def get_channel(guild_id, type_):
     )
     return row.channel_id if row else None
 
-# ─── КНОПКА СКЛАДА ─────────────────────────────────────────
+# ─── VIEW ДЛЯ СКЛАДА ──────────────────────────────────────
 class SkladView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -86,7 +86,6 @@ class SkladView(View):
                 await interaction.response.send_message("❌ Склад не найден", ephemeral=True)
                 return
 
-            # 🔒 защита — только автор
             if interaction.user.id != row.author:
                 await interaction.response.send_message("❌ Не твой склад", ephemeral=True)
                 return
@@ -101,6 +100,51 @@ class SkladView(View):
             )
 
             await interaction.response.send_message("✅ Склад обновлён", ephemeral=True)
+
+        except Exception:
+            print(traceback.format_exc())
+            await interaction.response.send_message("❌ Ошибка", ephemeral=True)
+
+    @discord.ui.button(label="Удалить", style=discord.ButtonStyle.red)
+    async def delete(self, button: Button, interaction: discord.Interaction):
+        try:
+            row = Timer.get_or_none(Timer.message_id == interaction.message.id)
+
+            if not row:
+                await interaction.response.send_message("❌ Уже удалено", ephemeral=True)
+                return
+
+            if interaction.user.id != row.author:
+                await interaction.response.send_message("❌ Не твой склад", ephemeral=True)
+                return
+
+            row.delete_instance()
+            await interaction.message.delete()
+
+        except Exception:
+            print(traceback.format_exc())
+            await interaction.response.send_message("❌ Ошибка", ephemeral=True)
+
+# ─── VIEW ДЛЯ ТАЙМЕРА ─────────────────────────────────────
+class TimerView(View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Удалить таймер", style=discord.ButtonStyle.red)
+    async def delete(self, button: Button, interaction: discord.Interaction):
+        try:
+            row = Timer.get_or_none(Timer.message_id == interaction.message.id)
+
+            if not row:
+                await interaction.response.send_message("❌ Таймер не найден", ephemeral=True)
+                return
+
+            if interaction.user.id != row.author:
+                await interaction.response.send_message("❌ Не твой таймер", ephemeral=True)
+                return
+
+            row.delete_instance()
+            await interaction.message.delete()
 
         except Exception:
             print(traceback.format_exc())
@@ -140,13 +184,13 @@ async def loop():
 async def on_ready():
     print(f"✅ Бот запущен: {bot.user}")
 
-    # 🔥 восстановление кнопок после рестарта
     bot.add_view(SkladView())
+    bot.add_view(TimerView())
 
     if not loop.is_running():
         loop.start()
 
-# ─── SET SKLAD CHANNEL ────────────────────────────────────
+# ─── КОМАНДЫ ──────────────────────────────────────────────
 @bot.slash_command(name="setskladchannel", guild_ids=[GUILD_ID])
 async def setskladchannel(ctx, channel: discord.TextChannel):
 
@@ -157,7 +201,7 @@ async def setskladchannel(ctx, channel: discord.TextChannel):
     set_channel(ctx.guild.id, channel.id, "sklad")
     await ctx.respond(f"✅ Канал складов: {channel.mention}", ephemeral=True)
 
-# ─── SET SIMPLE TIMER CHANNEL ─────────────────────────────
+
 @bot.slash_command(name="setsimpletimer", guild_ids=[GUILD_ID])
 async def setsimpletimer(ctx, channel: discord.TextChannel):
 
@@ -168,7 +212,7 @@ async def setsimpletimer(ctx, channel: discord.TextChannel):
     set_channel(ctx.guild.id, channel.id, "simple")
     await ctx.respond(f"✅ Канал таймеров: {channel.mention}", ephemeral=True)
 
-# ─── /ТАЙМЕР ───────────────────────────────────────────────
+
 @bot.slash_command(name="таймер", guild_ids=[GUILD_ID])
 async def timer(
     ctx,
@@ -177,7 +221,6 @@ async def timer(
     hours: int = 0,
     minutes: int = 0
 ):
-    # ❌ проверка на нулевое время
     if days == 0 and hours == 0 and minutes == 0:
         await ctx.respond("❌ Укажи время", ephemeral=True)
         return
@@ -194,7 +237,8 @@ async def timer(
     msg = await ctx.send(
         f"⏳ **{название}**\n"
         f"👤 Создал: {ctx.author.mention}\n"
-        f"⏰ <t:{end_ts}:R>"
+        f"⏰ <t:{end_ts}:R>",
+        view=TimerView()
     )
 
     Timer.create(
@@ -208,7 +252,7 @@ async def timer(
 
     await ctx.respond("✅ Таймер создан", ephemeral=True)
 
-# ─── /СКЛАД ────────────────────────────────────────────────
+
 @bot.slash_command(name="склад", guild_ids=[GUILD_ID])
 async def sklad(
     ctx,
