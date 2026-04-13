@@ -1,6 +1,7 @@
 import os
 import asyncio
 import datetime
+import random
 from peewee import *
 from discord import (
     Bot, Intents, ApplicationContext, Option, SlashCommandOptionType,
@@ -9,15 +10,15 @@ from discord import (
 )
 from discord.ui import View, Button
 
-# ─── Настройки ───────────────────────────────────────────────────────────
+# ─── Настройки ────────────────────────────────────────────────
 db = SqliteDatabase('TimerDataBase.db')
 DSBot = Bot(intents=Intents.all())
 GUILD_ID = 1492964694577905684
 
-# Укажи здесь ID роли, которой разрешено менять каналы
-allowed_role_id = 123456789012345678  # <-- замените на ID вашей роли
+# Роль, которой разрешено менять каналы (укажи ID роли)
+allowed_role_id = 123456789012345678  
 
-# ─── Модели ──────────────────────────────────────────────────────────────
+# ─── Модели ─────────────────────────────────────────────────
 class TableBase(Model):
     guild_id = BigIntegerField()
     class Meta:
@@ -27,6 +28,7 @@ class Table_SkladTimer(TableBase):
     channel_id = BigIntegerField()
     message_id = BigIntegerField()
     text = TextField()
+    time_shift = BigIntegerField()
     time_end = BigIntegerField()
 
 class Table_SimpleTimer(TableBase):
@@ -46,8 +48,8 @@ class Table_SimpleChannel(TableBase):
 
 db.create_tables([Table_SkladTimer, Table_SimpleTimer, Table_SkladChannel, Table_SimpleChannel])
 
-# ─── Вспомогательные функции ─────────────────────────────────────────────
-def get_channel_id(table, guild_id: int):
+# ─── Вспомогательные функции ───────────────────────────────
+def get_channel_id(table, guild_id: int) -> int | None:
     try:
         return table.get(table.guild_id == guild_id).channel_id
     except table.DoesNotExist:
@@ -61,23 +63,25 @@ def set_channel_id(table, guild_id: int, channel_id: int):
     else:
         table.create(guild_id=guild_id, channel_id=channel_id)
 
-def format_sklad_text(author, hex_val, region, warehouse, password):
+def format_sklad_text(hex_val: str, region: str, warehouse: str, password: str) -> str:
     return (
-        f"👤 {author}\n"
         f"**Гекс:** {hex_val}\n"
         f"**Регион:** {region}\n"
         f"**Склад:** {warehouse}\n"
         f"**Пароль:** {password}"
     )
 
-# ─── Фоновый цикл ────────────────────────────────────────────────────────
+def get_timer_emoji(time_end: int) -> str:
+    now = int(datetime.datetime.now().timestamp())
+    return "⏳" if time_end > now else "✅"
+
+# ─── Фоновый цикл ──────────────────────────────────────────
 @DSBot.event
 async def on_ready():
     print(f"Бот {DSBot.user} запущен!")
     while True:
         now = int(datetime.datetime.now().timestamp())
-
-        # склад таймеры (удаляются)
+        # ─── Таймеры склада ───
         with db:
             for timer in Table_SkladTimer.select().where(Table_SkladTimer.time_end < now):
                 guild: Guild = DSBot.get_guild(timer.guild_id)
@@ -88,10 +92,9 @@ async def on_ready():
                             msg: Message = await channel.fetch_message(timer.message_id)
                             await msg.delete()
                         except HTTPException:
-                            pass
+                            print(f"[Склад] Ошибка удаления {timer.message_id}")
                 timer.delete_instance()
-
-        # обычные таймеры
+        # ─── Обычные таймеры ───
         with db:
             for timer in Table_SimpleTimer.select().where(Table_SimpleTimer.time_end < now):
                 guild: Guild = DSBot.get_guild(timer.guild_id)
@@ -100,137 +103,113 @@ async def on_ready():
                     if channel:
                         try:
                             msg: Message = await channel.fetch_message(timer.message_id)
-                            header = f"👤 {timer.author_name} · создан в <t:{timer.created_at}:t>"
-                            await msg.edit(content=f"{header}\n{timer.text}\n✅ **Готово**")
+                            name = timer.author_name or f"<@{timer.author_id}>" if timer.author_id else ""
+                            header = f"👤 {name} · создан в <t:{timer.created_at}:t>" if name else ""
+                            emoji = get_timer_emoji(timer.time_end)
+                            content = f"{emoji} {header}\n{timer.text}\n✅ **Готово**".strip()
+                            await msg.edit(content=content, view=None)
                         except HTTPException:
-                            pass
+                            print(f"[Таймер] Ошибка редактирования {timer.message_id}")
                 timer.delete_instance()
-
         await asyncio.sleep(6)
 
-# ─── Настройка каналов ───────────────────────────────────────────────────
-@DSBot.slash_command(name="setskladchannel", guild_ids=[GUILD_ID])
-async def setskladchannel(ctx: ApplicationContext,
-    channel: Option(SlashCommandOptionType.channel, channel_types=[ChannelType.text])):
-
-    if not ctx.author.guild_permissions.administrator and allowed_role_id not in [role.id for role in ctx.author.roles]:
-        await ctx.respond(f"❌ Только админы или роль с ID {allowed_role_id} могут менять канал склада.", ephemeral=True)
+# ─── Команды настройки каналов ─────────────────────────────
+@DSBot.slash_command(name="setskladchannel", guild_ids=[GUILD_ID],
+    description="Установить канал для таймеров склада")
+async def setskladchannel_command(ctx: ApplicationContext,
+    channel: Option(SlashCommandOptionType.channel, description="Канал", channel_types=[ChannelType.text])):
+    if not (ctx.author.guild_permissions.administrator or allowed_role_id in [r.id for r in ctx.author.roles]):
+        await ctx.respond("❌ Только для админов или указанной роли.", ephemeral=True)
         return
-
     with db:
         set_channel_id(Table_SkladChannel, ctx.guild.id, channel.id)
+    await ctx.respond(f"✅ Канал склада: {channel.mention}", ephemeral=True)
 
-    await ctx.respond(f"✅ Канал склада установлен: {channel.mention}", ephemeral=True)
-
-
-@DSBot.slash_command(name="setsimplechannel", guild_ids=[GUILD_ID])
-async def setsimplechannel(ctx: ApplicationContext,
-    channel: Option(SlashCommandOptionType.channel, channel_types=[ChannelType.text])):
-
-    if not ctx.author.guild_permissions.administrator and allowed_role_id not in [role.id for role in ctx.author.roles]:
-        await ctx.respond(f"❌ Только админы или роль с ID {allowed_role_id} могут менять канал таймеров.", ephemeral=True)
+@DSBot.slash_command(name="setsimplechannel", guild_ids=[GUILD_ID],
+    description="Установить канал для обычных таймеров")
+async def setsimplechannel_command(ctx: ApplicationContext,
+    channel: Option(SlashCommandOptionType.channel, description="Канал", channel_types=[ChannelType.text])):
+    if not (ctx.author.guild_permissions.administrator or allowed_role_id in [r.id for r in ctx.author.roles]):
+        await ctx.respond("❌ Только для админов или указанной роли.", ephemeral=True)
         return
-
     with db:
         set_channel_id(Table_SimpleChannel, ctx.guild.id, channel.id)
+    await ctx.respond(f"✅ Канал таймеров: {channel.mention}", ephemeral=True)
 
-    await ctx.respond(f"✅ Канал таймеров установлен: {channel.mention}", ephemeral=True)
-
-# ─── Склад ───────────────────────────────────────────────────────────────
-@DSBot.slash_command(name="склад", guild_ids=[GUILD_ID])
-async def sklad(ctx: ApplicationContext,
-    hex_val: Option(str, name="гекс"),
-    region: Option(str, name="регион"),
-    warehouse: Option(str, name="склад"),
-    password: Option(str, name="пароль")):
+# ─── /склад ───────────────────────────────────────────────
+@DSBot.slash_command(name="склад", guild_ids=[GUILD_ID], description="Создать таймер склада")
+async def timer_command(ctx: ApplicationContext,
+    hex_val: Option(SlashCommandOptionType.string, name="гекс", description="Гекс"),
+    region: Option(SlashCommandOptionType.string, name="регион", description="Регион"),
+    warehouse: Option(SlashCommandOptionType.string, name="склад", description="Склад"),
+    password: Option(SlashCommandOptionType.string, name="пароль", description="Пароль")):
 
     sklad_channel_id = get_channel_id(Table_SkladChannel, ctx.guild.id)
     if sklad_channel_id and ctx.channel.id != sklad_channel_id:
-        await ctx.respond("❌ Не тот канал", ephemeral=True)
+        ch = ctx.guild.get_channel(sklad_channel_id)
+        mention = ch.mention if ch else f"<#{sklad_channel_id}>"
+        await ctx.respond(f"❌ Только в канале {mention}.", ephemeral=True)
         return
 
-    now = datetime.datetime.now()
-    time_end = int((now + datetime.timedelta(days=2, hours=1)).timestamp())
-
-    text = format_sklad_text(ctx.author.display_name, hex_val, region, warehouse, password)
-
+    current_time = datetime.datetime.now()
+    time_end = int((current_time + datetime.timedelta(days=2, hours=1)).timestamp())
+    text = format_sklad_text(hex_val, region, warehouse, password)
     view = View()
     view.add_item(Button(label="Обновить таймер", style=ButtonStyle.grey, custom_id="update_sklad_timer"))
-
-    msg = await ctx.send(f"{text}\n⏰ — <t:{time_end}:R>", view=view)
-
+    timer_message = await ctx.send(f"{text}\n⏰ — <t:{time_end}:R>", view=view)
     with db:
-        Table_SkladTimer.create(
-            guild_id=ctx.guild.id,
-            channel_id=ctx.channel.id,
-            message_id=msg.id,
-            text=text,
-            time_end=time_end
-        )
+        Table_SkladTimer.create(guild_id=ctx.guild.id, channel_id=ctx.channel.id,
+            message_id=timer_message.id, text=text,
+            time_shift=time_end - int(current_time.timestamp()), time_end=time_end)
+    await ctx.respond("✅ Таймер склада установлен!", ephemeral=True)
 
-    await ctx.respond("✅ Таймер создан!", ephemeral=True)
-
-# ─── Обычный таймер (с выбором времени) ─────────────────────────────────
-@DSBot.slash_command(name="таймер", guild_ids=[GUILD_ID])
-async def timer(ctx: ApplicationContext,
-    text: Option(str, name="текст", description="Текст таймера"),
-    days: Option(int, name="дни", description="Дни", default=0),
-    hours: Option(int, name="часы", description="Часы", default=0),
-    minutes: Option(int, name="минуты", description="Минуты", default=0),
-    seconds: Option(int, name="секунды", description="Секунды", default=0)):
+# ─── /таймер ───────────────────────────────────────────────
+@DSBot.slash_command(name="таймер", guild_ids=[GUILD_ID], description="Создать обычный таймер")
+async def simpletimer_command(ctx: ApplicationContext,
+    text: Option(SlashCommandOptionType.string, name="текст", description="Текст таймера"),
+    days: Option(SlashCommandOptionType.integer, default=0, description="Время в днях"),
+    hours: Option(SlashCommandOptionType.integer, default=0, description="Время в часах"),
+    minutes: Option(SlashCommandOptionType.integer, default=1, description="Время в минутах"),
+    seconds: Option(SlashCommandOptionType.integer, default=0, description="Время в секундах")):
 
     simple_channel_id = get_channel_id(Table_SimpleChannel, ctx.guild.id)
     if simple_channel_id and ctx.channel.id != simple_channel_id:
         ch = ctx.guild.get_channel(simple_channel_id)
         mention = ch.mention if ch else f"<#{simple_channel_id}>"
-        await ctx.respond(f"❌ Только в канале {mention}", ephemeral=True)
+        await ctx.respond(f"❌ Только в канале {mention}.", ephemeral=True)
         return
 
-    if days == 0 and hours == 0 and minutes == 0 and seconds == 0:
-        await ctx.respond("❌ Укажи хотя бы какое-то время", ephemeral=True)
-        return
-
-    now = datetime.datetime.now()
-    created = int(now.timestamp())
-    time_end = int((now + datetime.timedelta(days=days, hours=hours, minutes=minutes, seconds=seconds)).timestamp())
-
-    header = f"👤 {ctx.author.display_name} · создан в <t:{created}:t>"
-    msg = await ctx.send(f"{header}\n{text}\n⏰ — <t:{time_end}:R>")
-
+    current_time = datetime.datetime.now()
+    created_at = int(current_time.timestamp())
+    time_end = int((current_time + datetime.timedelta(days=days, hours=hours, minutes=minutes, seconds=seconds)).timestamp())
+    header = f"👤 {ctx.author.display_name} · создан в <t:{created_at}:t>"
+    emoji = get_timer_emoji(time_end)
+    timer_message = await ctx.send(f"{emoji} {header}\n{text}\n⏰ — <t:{time_end}:R>")
     with db:
-        Table_SimpleTimer.create(
-            guild_id=ctx.guild.id,
-            channel_id=ctx.channel.id,
-            message_id=msg.id,
-            text=text,
-            time_end=time_end,
-            author_name=ctx.author.display_name,
-            created_at=created
-        )
+        Table_SimpleTimer.create(guild_id=ctx.guild.id, channel_id=ctx.channel.id,
+            message_id=timer_message.id, text=text, time_end=time_end,
+            author_id=ctx.author.id, author_name=ctx.author.display_name, created_at=created_at)
+    await ctx.respond("✅ Таймер установлен!", ephemeral=True)
 
-    await ctx.respond("✅ Таймер создан!", ephemeral=True)
-
-# ─── Кнопка обновления склада ─────────────────────────────────────────────
+# ─── Кнопка обновления ──────────────────────────────────────
 async def on_button_clicked(interaction: Interaction):
-    if interaction.type == InteractionType.component:
-        if interaction.data.get("custom_id") == "update_sklad_timer":
-            try:
-                timer = Table_SkladTimer.get(
-                    Table_SkladTimer.guild_id == interaction.guild.id,
-                    Table_SkladTimer.channel_id == interaction.channel.id,
-                    Table_SkladTimer.message_id == interaction.message.id
-                )
-                # Добавляем время с сохранением time_end
-                timer.time_end = int(datetime.datetime.now().timestamp()) + 2*24*3600 + 3600
-                timer.save()
-                await interaction.message.edit(content=f"{timer.text}\n⏰ — <t:{timer.time_end}:R>")
-                await interaction.response.send_message("✅ Таймер обновлён!", ephemeral=True)
-            except Table_SkladTimer.DoesNotExist:
-                await interaction.response.send_message("⚠️ Таймер не найден", ephemeral=True)
+    if interaction.type == InteractionType.component and interaction.data.get("custom_id") == "update_sklad_timer":
+        try:
+            timer = Table_SkladTimer.get(
+                Table_SkladTimer.guild_id == interaction.guild.id,
+                Table_SkladTimer.channel_id == interaction.channel.id,
+                Table_SkladTimer.message_id == interaction.message.id)
+            new_end = int(datetime.datetime.now().timestamp()) + timer.time_shift
+            timer.time_end = new_end
+            timer.save()
+            await interaction.message.edit(content=f"{timer.text}\n⏰ — <t:{new_end}:R>")
+            await interaction.response.send_message("✅ Таймер обновлён!", ephemeral=True)
+        except Table_SkladTimer.DoesNotExist:
+            await interaction.response.send_message("⚠️ Таймер не найден.", ephemeral=True)
 
-DSBot.add_listener(on_button_clicked, "on_interaction")
+DSBot.add_listener(func=on_button_clicked, name="on_interaction")
 
-# ─── Очистка при ручном удалении ──────────────────────────────────────────
+# ─── Очистка при ручном удалении ───────────────────────────
 @DSBot.event
 async def on_message_delete(message: Message):
     with db:
@@ -242,10 +221,9 @@ async def on_message_delete(message: Message):
             except table.DoesNotExist:
                 pass
 
-# ─── Запуск ─────────────────────────────────────────────────────────────
+# ─── Запуск ────────────────────────────────────────────────
 token = os.environ.get("DISCORD_BOT_TOKEN")
 if not token:
     print("ОШИБКА: Токен не найден!")
     exit(1)
-
 DSBot.run(token)
