@@ -13,6 +13,7 @@ from discord.ui import View, Button
 db = SqliteDatabase('TimerDataBase.db')
 DSBot = Bot(intents=Intents.all())
 GUILD_ID = 1492964694577905684
+allowed_role_name = "Таймер-Мастер"  # Роль, которой разрешено менять каналы
 
 # ─── Модели ──────────────────────────────────────────────────────────────
 class TableBase(Model):
@@ -110,27 +111,28 @@ async def on_ready():
 async def setskladchannel(ctx: ApplicationContext,
     channel: Option(SlashCommandOptionType.channel, channel_types=[ChannelType.text])):
 
-    if not ctx.author.guild_permissions.administrator:
-        await ctx.respond("❌ Только для администраторов", ephemeral=True)
+    if not ctx.author.guild_permissions.administrator and allowed_role_name not in [role.name for role in ctx.author.roles]:
+        await ctx.respond(f"❌ Только админы или роль **{allowed_role_name}** могут менять канал склада.", ephemeral=True)
         return
 
     with db:
         set_channel_id(Table_SkladChannel, ctx.guild.id, channel.id)
 
-    await ctx.respond(f"✅ Канал склада: {channel.mention}", ephemeral=True)
+    await ctx.respond(f"✅ Канал склада установлен: {channel.mention}", ephemeral=True)
+
 
 @DSBot.slash_command(name="setsimplechannel", guild_ids=[GUILD_ID])
 async def setsimplechannel(ctx: ApplicationContext,
     channel: Option(SlashCommandOptionType.channel, channel_types=[ChannelType.text])):
 
-    if not ctx.author.guild_permissions.administrator:
-        await ctx.respond("❌ Только для администраторов", ephemeral=True)
+    if not ctx.author.guild_permissions.administrator and allowed_role_name not in [role.name for role in ctx.author.roles]:
+        await ctx.respond(f"❌ Только админы или роль **{allowed_role_name}** могут менять канал таймеров.", ephemeral=True)
         return
 
     with db:
         set_channel_id(Table_SimpleChannel, ctx.guild.id, channel.id)
 
-    await ctx.respond(f"✅ Канал таймеров: {channel.mention}", ephemeral=True)
+    await ctx.respond(f"✅ Канал таймеров установлен: {channel.mention}", ephemeral=True)
 
 # ─── Склад ───────────────────────────────────────────────────────────────
 @DSBot.slash_command(name="склад", guild_ids=[GUILD_ID])
@@ -211,19 +213,32 @@ async def on_button_clicked(interaction: Interaction):
     if interaction.type == InteractionType.component:
         if interaction.data.get("custom_id") == "update_sklad_timer":
             try:
-                timer = Table_SkladTimer.get(Table_SkladTimer.message_id == interaction.message.id)
-
-                new_end = int(datetime.datetime.now().timestamp()) + 2*24*60*60 + 3600
+                timer = Table_SkladTimer.get(
+                    Table_SkladTimer.guild_id == interaction.guild.id,
+                    Table_SkladTimer.channel_id == interaction.channel.id,
+                    Table_SkladTimer.message_id == interaction.message.id
+                )
+                new_end = int(datetime.datetime.now().timestamp()) + (timer.time_end - int(datetime.datetime.now().timestamp()))
                 timer.time_end = new_end
                 timer.save()
-
                 await interaction.message.edit(content=f"{timer.text}\n⏰ — <t:{new_end}:R>")
-                await interaction.response.send_message("✅ Продлено на 2 дня и 1 час!", ephemeral=True)
-
+                await interaction.response.send_message("✅ Таймер обновлён!", ephemeral=True)
             except Table_SkladTimer.DoesNotExist:
-                await interaction.response.send_message("Ошибка", ephemeral=True)
+                await interaction.response.send_message("⚠️ Таймер не найден", ephemeral=True)
 
 DSBot.add_listener(on_button_clicked, "on_interaction")
+
+# ─── Очистка при ручном удалении ───────────────────────────────────────────
+@DSBot.event
+async def on_message_delete(message: Message):
+    with db:
+        for table in [Table_SkladTimer, Table_SimpleTimer]:
+            try:
+                table.get(table.guild_id == message.guild.id,
+                          table.channel_id == message.channel.id,
+                          table.message_id == message.id).delete_instance()
+            except table.DoesNotExist:
+                pass
 
 # ─── Запуск ──────────────────────────────────────────────────────────────
 token = os.environ.get("DISCORD_BOT_TOKEN")
