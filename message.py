@@ -152,7 +152,15 @@ def has_access(member):
     )
 
 
-# ─── VIEWS (PERSISTENT SAFE) ────────────────────────────
+# ─── SAFE FETCH (FIX FOR INTERACTION ERRORS) ────────────
+async def safe_fetch(channel, message_id):
+    try:
+        return await channel.fetch_message(message_id)
+    except:
+        return None
+
+
+# ─── VIEWS ──────────────────────────────────────────────
 class TimerView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -162,19 +170,20 @@ class TimerView(View):
         style=discord.ButtonStyle.red,
         custom_id="timer_delete_btn"
     )
-    async def delete(self, interaction: discord.Interaction):
+    async def delete(self, interaction: discord.Interaction, button: discord.ui.Button):
 
         await interaction.response.defer(ephemeral=True)
 
-        t = TIMERS.get(interaction.message.id)
+        msg_id = interaction.message.id
+        t = TIMERS.get(msg_id)
 
         if not t:
-            return await interaction.followup.send("❌ Таймер не найден", ephemeral=True)
+            return await interaction.followup.send("❌ Не найдено", ephemeral=True)
 
         if interaction.user.id != t["author"]:
             return await interaction.followup.send("❌ Нет прав", ephemeral=True)
 
-        delete_timer(interaction.message.id)
+        delete_timer(msg_id)
 
         try:
             await interaction.message.delete()
@@ -193,12 +202,15 @@ class SkladView(View):
         style=discord.ButtonStyle.green,
         custom_id="sklad_update_btn"
     )
-    async def update(self, interaction: discord.Interaction):
+    async def update(self, interaction: discord.Interaction, button: discord.ui.Button):
 
-        t = TIMERS.get(interaction.message.id)
+        await interaction.response.defer(ephemeral=True)
+
+        msg_id = interaction.message.id
+        t = TIMERS.get(msg_id)
 
         if not t:
-            return await interaction.response.send_message("❌ Не найдено", ephemeral=True)
+            return await interaction.followup.send("❌ Не найдено", ephemeral=True)
 
         new_end = int(time.time()) + 48 * 3600
         t["time_end"] = new_end
@@ -209,28 +221,31 @@ class SkladView(View):
             content=f"{t['text']}\n\n⏰ Обновлено: 48 часов (<t:{new_end}:R>)"
         )
 
-        await interaction.response.send_message("✅ Обновлено", ephemeral=True)
+        await interaction.followup.send("✅ Обновлено", ephemeral=True)
 
     @discord.ui.button(
         label="Удалить",
         style=discord.ButtonStyle.red,
         custom_id="sklad_delete_btn"
     )
-    async def delete(self, interaction: discord.Interaction):
+    async def delete(self, interaction: discord.Interaction, button: discord.ui.Button):
 
-        t = TIMERS.get(interaction.message.id)
+        await interaction.response.defer(ephemeral=True)
+
+        msg_id = interaction.message.id
+        t = TIMERS.get(msg_id)
 
         if not t or interaction.user.id != t["author"]:
-            return await interaction.response.send_message("❌ Нет прав", ephemeral=True)
+            return await interaction.followup.send("❌ Нет прав", ephemeral=True)
 
-        delete_timer(interaction.message.id)
+        delete_timer(msg_id)
 
         try:
             await interaction.message.delete()
         except:
             pass
 
-        await interaction.response.send_message("✅ Удалено", ephemeral=True)
+        await interaction.followup.send("✅ Удалено", ephemeral=True)
 
 
 # ─── LOOP ───────────────────────────────────────────────
@@ -252,10 +267,7 @@ async def checker():
             remove.append(msg_id)
             continue
 
-        try:
-            msg = await channel.fetch_message(msg_id)
-        except:
-            msg = None
+        msg = await safe_fetch(channel, msg_id)
 
         if not msg:
             remove.append(msg_id)
@@ -287,8 +299,6 @@ async def on_ready():
     init_db()
     load_timers()
     load_channels()
-
-    # ❗ ВАЖНО: НЕТ bot.add_view()
 
     if not checker.is_running():
         checker.start()
