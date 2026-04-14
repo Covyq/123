@@ -244,15 +244,23 @@ async def setsimpletimer(ctx, channel: discord.TextChannel):
     set_channel(ctx.guild.id, channel.id, "simple")
     await ctx.respond(f"✅ Таймер канал: {channel.mention}", ephemeral=True)
 
-
+# ─── MPF THREAD SET ───────────────────────────────────────
 @bot.slash_command(name="setmpfchat", guild_ids=[GUILD_ID])
-async def setmpfchat(ctx, channel: discord.TextChannel):
+async def setmpfchat(ctx, thread_id: str):
+
     if not has_access(ctx.author):
         await ctx.respond("❌ Нет прав", ephemeral=True)
         return
 
-    set_channel(ctx.guild.id, channel.id, "mpf")
-    await ctx.respond(f"✅ MPF канал: {channel.mention}", ephemeral=True)
+    try:
+        thread_id = int(thread_id)
+    except ValueError:
+        await ctx.respond("❌ Введи корректный ID ветки", ephemeral=True)
+        return
+
+    set_channel(ctx.guild.id, thread_id, "mpf")
+
+    await ctx.respond(f"✅ MPF ветка установлена: `{thread_id}`", ephemeral=True)
 
 # ─── ТАЙМЕР ───────────────────────────────────────────────
 @bot.slash_command(name="таймер", guild_ids=[GUILD_ID])
@@ -299,13 +307,13 @@ async def mpf(ctx, что: str, ящики: int, дни: int = 0, часы: int 
     channel_id = get_channel(ctx.guild.id, "mpf")
 
     if not channel_id:
-        await ctx.respond("❌ MPF канал не настроен", ephemeral=True)
+        await ctx.respond("❌ MPF ветка не настроена", ephemeral=True)
         return
 
-    channel = bot.get_channel(channel_id)
-
-    if not channel:
-        await ctx.respond("❌ Канал не найден", ephemeral=True)
+    try:
+        channel = await bot.fetch_channel(channel_id)
+    except:
+        await ctx.respond("❌ Не удалось найти ветку", ephemeral=True)
         return
 
     end = datetime.datetime.utcnow() + datetime.timedelta(days=дни, hours=часы, minutes=минуты)
@@ -355,8 +363,9 @@ async def sklad(ctx, гекс: str, регион: str, склад: str, паро
     )
 
     msg = await ctx.send(
-        f"{text}\n\n⏰ 48 часов (<t:{end_ts}:R>)"
-    , view=SkladView())
+        f"{text}\n\n⏰ 48 часов (<t:{end_ts}:R>)",
+        view=SkladView()
+    )
 
     Timer.create(
         guild_id=ctx.guild.id,
