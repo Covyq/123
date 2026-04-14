@@ -152,15 +152,7 @@ def has_access(member):
     )
 
 
-# ─── SAFE FETCH (FIX FOR INTERACTION ERRORS) ────────────
-async def safe_fetch(channel, message_id):
-    try:
-        return await channel.fetch_message(message_id)
-    except:
-        return None
-
-
-# ─── VIEWS ──────────────────────────────────────────────
+# ─── VIEWS (FIXED CALLBACK SIGNATURES) ──────────────────
 class TimerView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -174,8 +166,7 @@ class TimerView(View):
 
         await interaction.response.defer(ephemeral=True)
 
-        msg_id = interaction.message.id
-        t = TIMERS.get(msg_id)
+        t = TIMERS.get(interaction.message.id)
 
         if not t:
             return await interaction.followup.send("❌ Не найдено", ephemeral=True)
@@ -183,7 +174,7 @@ class TimerView(View):
         if interaction.user.id != t["author"]:
             return await interaction.followup.send("❌ Нет прав", ephemeral=True)
 
-        delete_timer(msg_id)
+        delete_timer(interaction.message.id)
 
         try:
             await interaction.message.delete()
@@ -206,8 +197,7 @@ class SkladView(View):
 
         await interaction.response.defer(ephemeral=True)
 
-        msg_id = interaction.message.id
-        t = TIMERS.get(msg_id)
+        t = TIMERS.get(interaction.message.id)
 
         if not t:
             return await interaction.followup.send("❌ Не найдено", ephemeral=True)
@@ -232,13 +222,12 @@ class SkladView(View):
 
         await interaction.response.defer(ephemeral=True)
 
-        msg_id = interaction.message.id
-        t = TIMERS.get(msg_id)
+        t = TIMERS.get(interaction.message.id)
 
         if not t or interaction.user.id != t["author"]:
             return await interaction.followup.send("❌ Нет прав", ephemeral=True)
 
-        delete_timer(msg_id)
+        delete_timer(interaction.message.id)
 
         try:
             await interaction.message.delete()
@@ -267,7 +256,10 @@ async def checker():
             remove.append(msg_id)
             continue
 
-        msg = await safe_fetch(channel, msg_id)
+        try:
+            msg = await channel.fetch_message(msg_id)
+        except:
+            msg = None
 
         if not msg:
             remove.append(msg_id)
