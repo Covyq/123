@@ -71,7 +71,6 @@ def load_timers():
             "text": row[4],
             "time_end": row[5],
             "type": row[6],
-            "taken_by": None
         }
 
     conn.close()
@@ -153,44 +152,7 @@ def has_access(member):
     )
 
 
-# ─── MPF VIEW (UPDATED) ─────────────────────────────────
-class MPFView(View):
-    def __init__(self):
-        super().__init__(timeout=None)
-
-    @discord.ui.button(
-        label="Забрал заказ",
-        style=discord.ButtonStyle.green,
-        custom_id="mpf_take_order_btn"
-    )
-    async def take_order(self, interaction: discord.Interaction, button: discord.ui.Button):
-
-        await interaction.response.defer(ephemeral=True)
-
-        t = TIMERS.get(interaction.message.id)
-
-        if not t:
-            return await interaction.followup.send("❌ Заказ не найден", ephemeral=True)
-
-        user = interaction.user
-
-        t["taken_by"] = user.id
-
-        new_content = (
-            f"{t['text']}\n\n"
-            f"⏰ <t:{t['time_end']}:R>\n\n"
-            f"📦 Забрал: {user.mention}"
-        )
-
-        try:
-            await interaction.message.edit(content=new_content)
-        except:
-            return await interaction.followup.send("❌ Ошибка обновления", ephemeral=True)
-
-        await interaction.followup.send("✅ Отмечено", ephemeral=True)
-
-
-# ─── TIMER VIEW ─────────────────────────────────────────
+# ─── TIMER VIEW (без кнопок MPF) ─────────────────────────
 class TimerView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -200,7 +162,7 @@ class TimerView(View):
         style=discord.ButtonStyle.red,
         custom_id="timer_delete_btn"
     )
-    async def delete(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def delete(self, interaction: discord.Interaction):
 
         await interaction.response.defer(ephemeral=True)
 
@@ -232,7 +194,7 @@ class SkladView(View):
         style=discord.ButtonStyle.green,
         custom_id="sklad_update_btn"
     )
-    async def update(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def update(self, interaction: discord.Interaction):
 
         await interaction.response.defer(ephemeral=True)
 
@@ -397,7 +359,7 @@ async def mpf(ctx, что: str, ящики: int, hours: int = 0, minutes: int = 
 
     msg = await channel.send(
         f"{text}\n⏰ <t:{end}:R>",
-        view=MPFView()
+        view=None
     )
 
     t = {
