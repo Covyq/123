@@ -21,8 +21,8 @@ bot = discord.Bot(
 )
 
 # ─────────────────────────────────────────────
-CHANNELS = {}   # {guild: {type: channel_id}}
-TIMERS = {}     # {message_id: data}
+CHANNELS = {}
+TIMERS = {}
 db = None
 
 # ─────────────────────────────────────────────
@@ -34,7 +34,7 @@ async def safe_defer(interaction):
         pass
 
 
-async def safe_send(interaction, text):
+async def safe_followup(interaction, text):
     try:
         await interaction.followup.send(text, ephemeral=True)
     except:
@@ -86,25 +86,25 @@ async def init_db():
 
 
 # ─────────────────────────────────────────────
-# LOAD STATE
 async def load_state():
-    global CHANNELS, TIMERS
+    global TIMERS, CHANNELS
 
-    CHANNELS.clear()
     TIMERS.clear()
+    CHANNELS.clear()
 
     async with db.execute("SELECT * FROM timers") as cur:
-        for row in await cur.fetchall():
-            msg_id, guild_id, channel_id, author, text, end, type_ = row
-            TIMERS[msg_id] = {
-                "message_id": msg_id,
-                "guild_id": guild_id,
-                "channel_id": channel_id,
-                "author": author,
-                "text": text,
-                "time_end": end,
-                "type": type_
-            }
+        rows = await cur.fetchall()
+
+    for msg_id, guild_id, channel_id, author, text, end, type_ in rows:
+        TIMERS[msg_id] = {
+            "message_id": msg_id,
+            "guild_id": guild_id,
+            "channel_id": channel_id,
+            "author": author,
+            "text": text,
+            "time_end": end,
+            "type": type_
+        }
 
     async with db.execute("SELECT guild_id, type, channel_id FROM channels") as cur:
         for g, t, c in await cur.fetchall():
@@ -112,7 +112,6 @@ async def load_state():
 
 
 # ─────────────────────────────────────────────
-# CHANNEL SYSTEM
 def get_channel(guild, type_):
     return CHANNELS.get(guild, {}).get(type_)
 
@@ -139,7 +138,6 @@ def has_access(member):
 
 
 # ─────────────────────────────────────────────
-# TIMER CORE
 async def save_timer(t):
     TIMERS[t["message_id"]] = t
 
@@ -154,7 +152,6 @@ async def save_timer(t):
         t["time_end"],
         t["type"]
     ))
-
     await db.commit()
 
 
@@ -165,7 +162,7 @@ async def delete_timer(msg_id):
 
 
 # ─────────────────────────────────────────────
-# BUTTONS (BULLETPROOF)
+# BUTTONS (FIXED + STABLE)
 class GlobalView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -177,9 +174,9 @@ class GlobalView(discord.ui.View):
         try:
             await delete_timer(interaction.message.id)
             await safe_delete(interaction.message)
-            await safe_send(interaction, "✅ удалено")
-        except:
-            pass
+            await safe_followup(interaction, "✅ удалено")
+        except Exception as e:
+            print("BUTTON DELETE ERROR:", e)
 
 
     @discord.ui.button(label="Обновить склад", style=discord.ButtonStyle.green, custom_id="skl")
@@ -195,14 +192,14 @@ class GlobalView(discord.ui.View):
                 f"{base}\n\n⏰ обновлено 48ч (<t:{new_end}:R>)"
             )
 
-            await safe_send(interaction, "✅ обновлено")
+            await safe_followup(interaction, "✅ обновлено")
 
-        except:
-            pass
+        except Exception as e:
+            print("BUTTON SKLAD ERROR:", e)
 
 
 # ─────────────────────────────────────────────
-# SCHEDULER (NO CRASH VERSION)
+# SCHEDULER
 async def scheduler():
     while True:
         try:
@@ -235,7 +232,8 @@ async def scheduler():
 
             await asyncio.sleep(10)
 
-        except:
+        except Exception as e:
+            print("SCHEDULER ERROR:", e)
             await asyncio.sleep(5)
 
 
@@ -339,8 +337,6 @@ async def mpf(ctx, что: str, ящики: int, hours: int = 0):
 
 
 # ─────────────────────────────────────────────
-# ADMIN COMMANDS
-
 @bot.slash_command(guild_ids=[GUILD_ID], name="setmpf")
 async def setmpf(ctx, channel: discord.TextChannel):
     if not has_access(ctx.author):
