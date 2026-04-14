@@ -3,7 +3,7 @@ import datetime
 import traceback
 import discord
 from discord.ext import tasks
-from discord.ui import View, Button
+from discord.ui import View
 from peewee import *
 
 # ─── НАСТРОЙКИ ─────────────────────────────────────────────
@@ -66,8 +66,6 @@ def load_channels():
 
 
 def clean_channels():
-    print("🧹 Cleaning invalid channels...")
-
     for row in ChannelConfig.select():
         guild = bot.get_guild(row.guild_id)
 
@@ -113,16 +111,13 @@ class TimerView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-        self.delete_btn = Button(
-            label="Удалить",
-            style=discord.ButtonStyle.red,
-            custom_id="timer_delete_btn"
-        )
+    @discord.ui.button(
+        label="Удалить",
+        style=discord.ButtonStyle.red,
+        custom_id="timer_delete_btn"
+    )
+    async def delete(self, interaction: discord.Interaction, button: discord.ui.Button):
 
-        self.delete_btn.callback = self.delete
-        self.add_item(self.delete_btn)
-
-    async def delete(self, interaction: discord.Interaction):
         row = Timer.get_or_none(Timer.message_id == interaction.message.id)
 
         if not row or interaction.user.id != row.author:
@@ -137,25 +132,13 @@ class SkladView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-        self.update_btn = Button(
-            label="Обновить склад",
-            style=discord.ButtonStyle.green,
-            custom_id="sklad_update_btn"
-        )
+    @discord.ui.button(
+        label="Обновить склад",
+        style=discord.ButtonStyle.green,
+        custom_id="sklad_update_btn"
+    )
+    async def update(self, interaction: discord.Interaction, button: discord.ui.Button):
 
-        self.delete_btn = Button(
-            label="Удалить",
-            style=discord.ButtonStyle.red,
-            custom_id="sklad_delete_btn"
-        )
-
-        self.update_btn.callback = self.update_callback
-        self.delete_btn.callback = self.delete_callback
-
-        self.add_item(self.update_btn)
-        self.add_item(self.delete_btn)
-
-    async def update_callback(self, interaction: discord.Interaction):
         row = Timer.get_or_none(Timer.message_id == interaction.message.id)
 
         if not row:
@@ -168,12 +151,17 @@ class SkladView(View):
 
         await interaction.message.edit(
             content=f"{row.text}\n\n⏰ Обновлено: 48 часов (<t:{new_end}:R>)",
-            view=self
         )
 
         await interaction.response.send_message("✅ Обновлено", ephemeral=True)
 
-    async def delete_callback(self, interaction: discord.Interaction):
+    @discord.ui.button(
+        label="Удалить",
+        style=discord.ButtonStyle.red,
+        custom_id="sklad_delete_btn"
+    )
+    async def delete(self, interaction: discord.Interaction, button: discord.ui.Button):
+
         row = Timer.get_or_none(Timer.message_id == interaction.message.id)
 
         if not row or interaction.user.id != row.author:
@@ -257,7 +245,6 @@ async def setsimpletimer(ctx, channel: discord.TextChannel):
     await ctx.respond(f"✅ Таймер канал: {channel.mention}", ephemeral=True)
 
 
-# 🔥 ПЕРЕИМЕНОВАНА КОМАНДА
 @bot.slash_command(name="setmpfchat", guild_ids=[GUILD_ID])
 async def setmpfchat(ctx, channel: discord.TextChannel):
     if not has_access(ctx.author):
@@ -368,9 +355,8 @@ async def sklad(ctx, гекс: str, регион: str, склад: str, паро
     )
 
     msg = await ctx.send(
-        f"{text}\n\n⏰ 48 часов (<t:{end_ts}:R>)",
-        view=SkladView()
-    )
+        f"{text}\n\n⏰ 48 часов (<t:{end_ts}:R>)"
+    , view=SkladView())
 
     Timer.create(
         guild_id=ctx.guild.id,
