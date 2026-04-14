@@ -50,7 +50,7 @@ class Timer(BaseModel):
     text = TextField()
     time_end = BigIntegerField()
     author = BigIntegerField()
-    type = TextField(default="simple")  # 👈 тип таймера
+    type = TextField(default="simple")
 
 
 db.connect(reuse_if_open=True)
@@ -111,17 +111,7 @@ def set_channel(guild_id, channel_id, type_):
 
 
 def get_channel(guild_id, type_):
-    channel_id = CHANNEL_CACHE.get(type_, {}).get(guild_id)
-
-    if not channel_id:
-        return None
-
-    guild = bot.get_guild(guild_id)
-
-    if guild and guild.get_channel(channel_id) is None:
-        return None
-
-    return channel_id
+    return CHANNEL_CACHE.get(type_, {}).get(guild_id)
 
 # ─── VIEW СКЛАД ───────────────────────────────────────────
 class SkladView(View):
@@ -170,11 +160,11 @@ class TimerView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-        delete_btn = Button(label="Удалить таймер", style=discord.ButtonStyle.red)
-        delete_btn.callback = self.delete_callback
-        self.add_item(delete_btn)
+        btn = Button(label="Удалить", style=discord.ButtonStyle.red)
+        btn.callback = self.delete
+        self.add_item(btn)
 
-    async def delete_callback(self, interaction: discord.Interaction):
+    async def delete(self, interaction: discord.Interaction):
         row = Timer.get_or_none(Timer.message_id == interaction.message.id)
 
         if not row or interaction.user.id != row.author:
@@ -195,21 +185,27 @@ async def loop():
             if not guild:
                 continue
 
-            channel = guild.get_channel(t.channel_id)
+            channel = bot.get_channel(t.channel_id)
             if not channel:
                 continue
 
             msg = await channel.fetch_message(t.message_id)
 
-            # 👇 MPF логика
+            # ─── MPF
             if t.type == "mpf":
-                content = f"{t.text}\n✅ Можно забирать"
+                content = (
+                    f"{t.text}\n"
+                    f"✅ Можно забирать"
+                )
 
-            # 👇 СКЛАД
+            # ─── СКЛАД
             elif t.type == "sklad":
-                content = f"{t.text}\n\n⏰ Склад истёк"
+                content = (
+                    f"{t.text}\n\n"
+                    f"⏰ Склад завершён"
+                )
 
-            # 👇 ОБЫЧНЫЙ ТАЙМЕР
+            # ─── ОБЫЧНЫЙ ТАЙМЕР
             else:
                 member = guild.get_member(t.author)
                 mention = member.mention if member else "пользователь"
@@ -240,8 +236,7 @@ async def on_ready():
     if not loop.is_running():
         loop.start()
 
-# ─── КОМАНДЫ ──────────────────────────────────────────────
-
+# ─── КАНАЛЫ ───────────────────────────────────────────────
 @bot.slash_command(name="setskladchannel", guild_ids=[GUILD_ID])
 async def setskladchannel(ctx, channel: discord.TextChannel):
     if not has_access(ctx.author):
@@ -249,7 +244,7 @@ async def setskladchannel(ctx, channel: discord.TextChannel):
         return
 
     set_channel(ctx.guild.id, channel.id, "sklad")
-    await ctx.respond(f"✅ Канал складов: {channel.mention}", ephemeral=True)
+    await ctx.respond(f"✅ Склад канал: {channel.mention}", ephemeral=True)
 
 
 @bot.slash_command(name="setsimpletimer", guild_ids=[GUILD_ID])
@@ -259,19 +254,19 @@ async def setsimpletimer(ctx, channel: discord.TextChannel):
         return
 
     set_channel(ctx.guild.id, channel.id, "simple")
-    await ctx.respond(f"✅ Канал таймеров: {channel.mention}", ephemeral=True)
+    await ctx.respond(f"✅ Таймер канал: {channel.mention}", ephemeral=True)
 
 
 @bot.slash_command(name="setchatmpf", guild_ids=[GUILD_ID])
-async def setchatmpf(ctx, channel: discord.TextChannel):
+async def setchatmpf(ctx, thread: discord.TextChannel):
     if not has_access(ctx.author):
         await ctx.respond("❌ Нет прав", ephemeral=True)
         return
 
-    set_channel(ctx.guild.id, channel.id, "mpf")
-    await ctx.respond(f"✅ Канал MPF: {channel.mention}", ephemeral=True)
+    set_channel(ctx.guild.id, thread.id, "mpf")
+    await ctx.respond(f"✅ MPF ветка: {thread.mention}", ephemeral=True)
 
-# ─── ОБЫЧНЫЙ ТАЙМЕР ───────────────────────────────────────
+# ─── ТАЙМЕР ───────────────────────────────────────────────
 @bot.slash_command(name="таймер", guild_ids=[GUILD_ID])
 async def timer(ctx, название: str, days: int = 0, hours: int = 0, minutes: int = 0):
 
@@ -281,7 +276,7 @@ async def timer(ctx, название: str, days: int = 0, hours: int = 0, minut
 
     channel_id = get_channel(ctx.guild.id, "simple")
 
-    if channel_id is None or ctx.channel.id != channel_id:
+    if not channel_id or ctx.channel.id != channel_id:
         await ctx.respond("❌ Не тот канал", ephemeral=True)
         return
 
@@ -305,7 +300,7 @@ async def timer(ctx, название: str, days: int = 0, hours: int = 0, minut
 
     await ctx.respond("✅ Таймер создан", ephemeral=True)
 
-# ─── MPF ──────────────────────────────────────────────────
+# ─── MPF ────────────────────────────────────────────────
 @bot.slash_command(name="мпф", guild_ids=[GUILD_ID])
 async def mpf(ctx, что: str, ящики: int, дни: int = 0, часы: int = 0, минуты: int = 0):
 
@@ -315,8 +310,14 @@ async def mpf(ctx, что: str, ящики: int, дни: int = 0, часы: int 
 
     channel_id = get_channel(ctx.guild.id, "mpf")
 
-    if channel_id is None or ctx.channel.id != channel_id:
-        await ctx.respond("❌ Не тот канал", ephemeral=True)
+    if not channel_id:
+        await ctx.respond("❌ MPF ветка не настроена", ephemeral=True)
+        return
+
+    channel = bot.get_channel(channel_id)
+
+    if not channel:
+        await ctx.respond("❌ Ветка не найдена", ephemeral=True)
         return
 
     end = datetime.datetime.utcnow() + datetime.timedelta(days=дни, hours=часы, minutes=минуты)
@@ -328,14 +329,14 @@ async def mpf(ctx, что: str, ящики: int, дни: int = 0, часы: int 
         f"📦 Количество ящиков: {ящики}"
     )
 
-    msg = await ctx.send(
+    msg = await channel.send(
         f"{text}\n⏰ <t:{end_ts}:R>",
         view=TimerView()
     )
 
     Timer.create(
         guild_id=ctx.guild.id,
-        channel_id=ctx.channel.id,
+        channel_id=channel.id,
         message_id=msg.id,
         text=text,
         time_end=end_ts,
