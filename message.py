@@ -54,7 +54,8 @@ class Timer(BaseModel):
 db.connect(reuse_if_open=True)
 db.create_tables([ChannelConfig, Timer])
 
-# ─── АВТО-ЗАГРУЗКА ─────────────────────────────────────────
+
+# ─── ЗАГРУЗКА КАНАЛОВ ─────────────────────────────────────
 def load_channels():
     global CHANNEL_CACHE
 
@@ -64,10 +65,13 @@ def load_channels():
     }
 
     for row in ChannelConfig.select():
+        if row.type not in CHANNEL_CACHE:
+            CHANNEL_CACHE[row.type] = {}
+
         CHANNEL_CACHE[row.type][row.guild_id] = row.channel_id
 
 
-# ─── АВТО-ОЧИСТКА БАЗЫ ─────────────────────────────────────
+# ─── ОЧИСТКА БАЗЫ ──────────────────────────────────────────
 def clean_channels():
     print("🧹 Cleaning invalid channels...")
 
@@ -82,12 +86,14 @@ def clean_channels():
             print(f"🗑 Removing dead channel: {row.channel_id}")
             row.delete_instance()
 
+
 # ─── ПРАВА ────────────────────────────────────────────────
 def has_access(member):
     return (
         member.guild_permissions.administrator or
         any(r.id in ALLOWED_ROLE_IDS for r in member.roles)
     )
+
 
 # ─── КАНАЛЫ ───────────────────────────────────────────────
 def set_channel(guild_id, channel_id, type_):
@@ -106,21 +112,12 @@ def set_channel(guild_id, channel_id, type_):
             type=type_
         )
 
-    CHANNEL_CACHE[type_][guild_id] = channel_id
+    CHANNEL_CACHE.setdefault(type_, {})[guild_id] = channel_id
 
 
 def get_channel(guild_id, type_):
-    channel_id = CHANNEL_CACHE.get(type_, {}).get(guild_id)
+    return CHANNEL_CACHE.get(type_, {}).get(guild_id)
 
-    if not channel_id:
-        return None
-
-    guild = bot.get_guild(guild_id)
-
-    if guild and guild.get_channel(channel_id) is None:
-        return None
-
-    return channel_id
 
 # ─── VIEW СКЛАД ───────────────────────────────────────────
 class SkladView(View):
@@ -188,6 +185,7 @@ class SkladView(View):
         except Exception:
             print(traceback.format_exc())
 
+
 # ─── VIEW ТАЙМЕР ──────────────────────────────────────────
 class TimerView(View):
     def __init__(self):
@@ -220,6 +218,7 @@ class TimerView(View):
         except Exception:
             print(traceback.format_exc())
 
+
 # ─── LOOP ─────────────────────────────────────────────────
 @tasks.loop(seconds=30)
 async def loop():
@@ -249,19 +248,26 @@ async def loop():
 
         t.delete_instance()
 
+
 # ─── READY ────────────────────────────────────────────────
 @bot.event
 async def on_ready():
     print(f"✅ Бот запущен: {bot.user}")
 
-    clean_channels()   # 🔥 авто-очистка БД
-    load_channels()    # 🔥 загрузка в кэш
+    db.connect(reuse_if_open=True)
+    db.create_tables([ChannelConfig, Timer])
+
+    clean_channels()
+    load_channels()
+
+    print("📦 CHANNEL CACHE:", CHANNEL_CACHE)
 
     bot.add_view(SkladView())
     bot.add_view(TimerView())
 
     if not loop.is_running():
         loop.start()
+
 
 # ─── КОМАНДЫ ──────────────────────────────────────────────
 @bot.slash_command(name="setskladchannel", guild_ids=[GUILD_ID])
@@ -362,6 +368,7 @@ async def sklad(ctx, гекс: str, регион: str, склад: str, паро
     )
 
     await ctx.respond("✅ Склад создан", ephemeral=True)
+
 
 # ─── RUN ────────────────────────────────────────────────
 bot.run(os.environ.get("DISCORD_BOT_TOKEN"))
