@@ -1,7 +1,7 @@
 import os
 import time
+import sqlite3
 import discord
-import aiosqlite
 from discord.ext import tasks
 from discord.ui import View
 
@@ -21,101 +21,123 @@ bot = discord.Bot(
 
 DB_PATH = "timers.db"
 
-# ─── MEMORY CACHE ───────────────────────────────────────
+# ─── MEMORY ─────────────────────────────────────────────
 CHANNEL_CACHE = {"sklad": {}, "simple": {}, "mpf": {}}
 TIMERS = {}
 
 # ─── DB INIT ────────────────────────────────────────────
-async def init_db():
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""
-        CREATE TABLE IF NOT EXISTS timers (
-            message_id INTEGER PRIMARY KEY,
-            guild_id INTEGER,
-            channel_id INTEGER,
-            author INTEGER,
-            text TEXT,
-            time_end INTEGER,
-            type TEXT
-        )
-        """)
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
 
-        await db.execute("""
-        CREATE TABLE IF NOT EXISTS channels (
-            guild_id INTEGER,
-            type TEXT,
-            channel_id INTEGER,
-            PRIMARY KEY (guild_id, type)
-        )
-        """)
-        await db.commit()
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS timers (
+        message_id INTEGER PRIMARY KEY,
+        guild_id INTEGER,
+        channel_id INTEGER,
+        author INTEGER,
+        text TEXT,
+        time_end INTEGER,
+        type TEXT
+    )
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS channels (
+        guild_id INTEGER,
+        type TEXT,
+        channel_id INTEGER,
+        PRIMARY KEY (guild_id, type)
+    )
+    """)
+
+    conn.commit()
+    conn.close()
 
 
-# ─── LOAD ───────────────────────────────────────────────
-async def load_timers():
+# ─── LOAD DATA ──────────────────────────────────────────
+def load_timers():
     global TIMERS
     TIMERS = {}
 
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("SELECT * FROM timers") as cur:
-            async for row in cur:
-                TIMERS[row[0]] = {
-                    "message_id": row[0],
-                    "guild_id": row[1],
-                    "channel_id": row[2],
-                    "author": row[3],
-                    "text": row[4],
-                    "time_end": row[5],
-                    "type": row[6],
-                }
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+
+    for row in cur.execute("SELECT * FROM timers"):
+        TIMERS[row[0]] = {
+            "message_id": row[0],
+            "guild_id": row[1],
+            "channel_id": row[2],
+            "author": row[3],
+            "text": row[4],
+            "time_end": row[5],
+            "type": row[6],
+        }
+
+    conn.close()
 
 
-async def load_channels():
+def load_channels():
     CHANNEL_CACHE["sklad"] = {}
     CHANNEL_CACHE["simple"] = {}
     CHANNEL_CACHE["mpf"] = {}
 
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("SELECT guild_id, type, channel_id FROM channels") as cur:
-            async for guild_id, type_, channel_id in cur:
-                CHANNEL_CACHE[type_][guild_id] = channel_id
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+
+    for guild_id, type_, channel_id in cur.execute(
+        "SELECT guild_id, type, channel_id FROM channels"
+    ):
+        CHANNEL_CACHE[type_][guild_id] = channel_id
+
+    conn.close()
 
 
 # ─── DB HELPERS ─────────────────────────────────────────
-async def save_timer(t):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""
-        INSERT OR REPLACE INTO timers
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (
-            t["message_id"],
-            t["guild_id"],
-            t["channel_id"],
-            t["author"],
-            t["text"],
-            t["time_end"],
-            t["type"]
-        ))
-        await db.commit()
+def save_timer(t):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+
+    cur.execute("""
+    INSERT OR REPLACE INTO timers
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (
+        t["message_id"],
+        t["guild_id"],
+        t["channel_id"],
+        t["author"],
+        t["text"],
+        t["time_end"],
+        t["type"]
+    ))
+
+    conn.commit()
+    conn.close()
 
 
-async def delete_timer(message_id):
+def delete_timer(message_id):
     TIMERS.pop(message_id, None)
 
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("DELETE FROM timers WHERE message_id=?", (message_id,))
-        await db.commit()
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("DELETE FROM timers WHERE message_id=?", (message_id,))
+    conn.commit()
+    conn.close()
 
 
-async def set_channel_db(guild_id, type_, channel_id):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""
-        INSERT INTO channels (guild_id, type, channel_id)
-        VALUES (?, ?, ?)
-        ON CONFLICT(guild_id, type)
-        DO UPDATE SET channel_id=excluded.channel_id
-        """, (guild_id, type_, channel_id))
-        await db.commit()
+def set_channel_db(guild_id, type_, channel_id):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+
+    cur.execute("""
+    INSERT INTO channels (guild_id, type, channel_id)
+    VALUES (?, ?, ?)
+    ON CONFLICT(guild_id, type)
+    DO UPDATE SET channel_id=excluded.channel_id
+    """, (guild_id, type_, channel_id))
+
+    conn.commit()
+    conn.close()
 
     CHANNEL_CACHE[type_][guild_id] = channel_id
 
@@ -149,7 +171,7 @@ class TimerView(View):
         if interaction.user.id != t["author"]:
             return await interaction.followup.send("❌ Нет прав", ephemeral=True)
 
-        await delete_timer(interaction.message.id)
+        delete_timer(interaction.message.id)
 
         try:
             await interaction.message.delete()
@@ -167,13 +189,14 @@ class SkladView(View):
     async def update(self, interaction: discord.Interaction):
 
         t = TIMERS.get(interaction.message.id)
+
         if not t:
             return await interaction.response.send_message("❌ Не найдено", ephemeral=True)
 
         new_end = int(time.time()) + 48 * 3600
         t["time_end"] = new_end
 
-        await save_timer(t)
+        save_timer(t)
 
         await interaction.message.edit(
             content=f"{t['text']}\n\n⏰ Обновлено: 48 часов (<t:{new_end}:R>)"
@@ -189,7 +212,7 @@ class SkladView(View):
         if not t or interaction.user.id != t["author"]:
             return await interaction.response.send_message("❌ Нет прав", ephemeral=True)
 
-        await delete_timer(interaction.message.id)
+        delete_timer(interaction.message.id)
 
         try:
             await interaction.message.delete()
@@ -242,7 +265,7 @@ async def checker():
         remove.append(msg_id)
 
     for i in remove:
-        await delete_timer(i)
+        delete_timer(i)
 
 
 # ─── READY ──────────────────────────────────────────────
@@ -250,9 +273,9 @@ async def checker():
 async def on_ready():
     print(f"✅ Logged in as {bot.user}")
 
-    await init_db()
-    await load_timers()
-    await load_channels()
+    init_db()
+    load_timers()
+    load_channels()
 
     bot.add_view(TimerView())
     bot.add_view(SkladView())
@@ -287,7 +310,7 @@ async def timer(ctx, название: str, hours: int = 0, minutes: int = 0):
     }
 
     TIMERS[msg.id] = t
-    await save_timer(t)
+    save_timer(t)
 
     await ctx.respond("✅ Таймер создан", ephemeral=True)
 
@@ -321,7 +344,7 @@ async def sklad(ctx, гекс: str, регион: str, склад: str, паро
     }
 
     TIMERS[msg.id] = t
-    await save_timer(t)
+    save_timer(t)
 
     await ctx.respond("✅ Склад создан", ephemeral=True)
 
@@ -363,7 +386,7 @@ async def mpf(ctx, что: str, ящики: int, hours: int = 0, minutes: int = 
     }
 
     TIMERS[msg.id] = t
-    await save_timer(t)
+    save_timer(t)
 
     await ctx.respond("✅ MPF создан", ephemeral=True)
 
@@ -374,7 +397,7 @@ async def setskladchannel(ctx, channel: discord.TextChannel):
     if not has_access(ctx.author):
         return await ctx.respond("❌ Нет прав", ephemeral=True)
 
-    await set_channel_db(ctx.guild.id, "sklad", channel.id)
+    set_channel_db(ctx.guild.id, "sklad", channel.id)
     await ctx.respond("✅ Склад канал установлен", ephemeral=True)
 
 
@@ -384,7 +407,7 @@ async def setsimpletimer(ctx, channel: discord.TextChannel):
     if not has_access(ctx.author):
         return await ctx.respond("❌ Нет прав", ephemeral=True)
 
-    await set_channel_db(ctx.guild.id, "simple", channel.id)
+    set_channel_db(ctx.guild.id, "simple", channel.id)
     await ctx.respond("✅ Таймер канал установлен", ephemeral=True)
 
 
@@ -399,7 +422,7 @@ async def setmpfchat(ctx, thread_id: str):
     except:
         return await ctx.respond("❌ Неверный ID", ephemeral=True)
 
-    await set_channel_db(ctx.guild.id, "mpf", thread_id)
+    set_channel_db(ctx.guild.id, "mpf", thread_id)
     await ctx.respond("✅ MPF канал установлен", ephemeral=True)
 
 
