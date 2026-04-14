@@ -105,21 +105,13 @@ def clean_channels():
             row.delete_instance()
 
 
-# ─── VIEWS ──────────────────────────────────────────────
+# ─── VIEWS (PERSISTENT FIXED) ───────────────────────────
 class SkladView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-        btn1 = Button(label="Обновить склад", style=discord.ButtonStyle.green)
-        btn2 = Button(label="Удалить", style=discord.ButtonStyle.red)
-
-        btn1.callback = self.update
-        btn2.callback = self.delete
-
-        self.add_item(btn1)
-        self.add_item(btn2)
-
-    async def update(self, interaction):
+    @discord.ui.button(label="Обновить склад", style=discord.ButtonStyle.green, custom_id="sklad_update")
+    async def update(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
 
         row = Timer.get_or_none(Timer.message_id == interaction.message.id)
@@ -135,7 +127,8 @@ class SkladView(View):
             view=self
         )
 
-    async def delete(self, interaction):
+    @discord.ui.button(label="Удалить", style=discord.ButtonStyle.red, custom_id="sklad_delete")
+    async def delete(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
 
         row = Timer.get_or_none(Timer.message_id == interaction.message.id)
@@ -148,11 +141,8 @@ class TimerView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-        btn = Button(label="Удалить", style=discord.ButtonStyle.red)
-        btn.callback = self.delete
-        self.add_item(btn)
-
-    async def delete(self, interaction):
+    @discord.ui.button(label="Удалить", style=discord.ButtonStyle.red, custom_id="timer_delete")
+    async def delete(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
 
         row = Timer.get_or_none(Timer.message_id == interaction.message.id)
@@ -165,16 +155,10 @@ class MPFView(View):
     def __init__(self, show_take=False):
         super().__init__(timeout=None)
 
-        if show_take:
-            btn = Button(label="Забрал заказ", style=discord.ButtonStyle.green)
-            btn.callback = self.take
-            self.add_item(btn)
+        self.show_take = show_take
 
-        del_btn = Button(label="Удалить", style=discord.ButtonStyle.red)
-        del_btn.callback = self.delete
-        self.add_item(del_btn)
-
-    async def take(self, interaction):
+    @discord.ui.button(label="Забрал заказ", style=discord.ButtonStyle.green, custom_id="mpf_take")
+    async def take(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
 
         row = Timer.get_or_none(Timer.message_id == interaction.message.id)
@@ -189,7 +173,8 @@ class MPFView(View):
             view=self
         )
 
-    async def delete(self, interaction):
+    @discord.ui.button(label="Удалить", style=discord.ButtonStyle.red, custom_id="mpf_delete")
+    async def delete(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
 
         row = Timer.get_or_none(Timer.message_id == interaction.message.id)
@@ -220,12 +205,8 @@ async def loop():
             member = guild.get_member(t.author)
             name = member.display_name if member else "неизвестный"
 
-            # ─── MPF ─────────────────────────────
             if t.kind == "mpf":
-                what = "неизвестно"
-
-                if "Что:" in t.text:
-                    what = t.text.split("Что:")[-1].strip()
+                what = t.text.split("Что:")[-1].strip() if "Что:" in t.text else "неизвестно"
 
                 await msg.edit(
                     content=
@@ -233,15 +214,13 @@ async def loop():
                     f"📦 Что поставил: {what}\n"
                     f"📦 Ящиков: {t.boxes}\n"
                     f"✅ Статус: Завершено",
-                    view=MPFView(show_take=True)
+                    view=MPFView()
                 )
 
-                # оставляем запись чтобы кнопки работали
                 t.time_end = now + 10**9
                 t.save()
                 continue
 
-            # ─── SIMPLE TIMER ────────────────────
             await msg.edit(content=f"✅ {t.text} завершён {name}")
             t.delete_instance()
 
