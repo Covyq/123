@@ -192,17 +192,25 @@ class TimerView(View):
             print(traceback.format_exc())
 
 
-# ─── MPF VIEW ───────────────────────────────────────────
+# ─── MPF VIEW (FIXED) ───────────────────────────────────
 class MPFView(View):
     def __init__(self, show_take: bool = False):
         super().__init__(timeout=None)
 
-        if show_take:
-            take = Button(label="Забрал заказ", style=discord.ButtonStyle.green, custom_id="mpf_take")
-            take.callback = self.take
-            self.add_item(take)
+        self.take_btn = Button(
+            label="Забрал заказ",
+            style=discord.ButtonStyle.green,
+            custom_id="mpf_take",
+            disabled=not show_take
+        )
+        self.take_btn.callback = self.take
+        self.add_item(self.take_btn)
 
-        delete = Button(label="Удалить таймер", style=discord.ButtonStyle.red, custom_id="mpf_delete")
+        delete = Button(
+            label="Удалить таймер",
+            style=discord.ButtonStyle.red,
+            custom_id="mpf_delete"
+        )
         delete.callback = self.delete
         self.add_item(delete)
 
@@ -275,7 +283,6 @@ async def loop():
             mention = member.mention if member else "пользователь"
 
             if t.kind == "mpf":
-                # извлекаем "что поставил" из текста
                 item = t.text.split("📦 Что поставил: ")[1].splitlines()[0]
 
                 await msg.edit(
@@ -350,7 +357,6 @@ async def setmpf(ctx, channel: discord.TextChannel):
     await ctx.respond("✅ MPF установлен", ephemeral=True)
 
 
-# ─── /ТАЙМЕР ───────────────────────────────────────────
 @bot.slash_command(name="таймер", guild_ids=[GUILD_ID])
 async def timer(ctx, название: str, days: int = 0, hours: int = 0, minutes: int = 0):
     if days == 0 and hours == 0 and minutes == 0:
@@ -384,7 +390,6 @@ async def timer(ctx, название: str, days: int = 0, hours: int = 0, minut
     await ctx.respond("✅ таймер создан", ephemeral=True)
 
 
-# ─── /СКЛАД ────────────────────────────────────────────
 @bot.slash_command(name="склад", guild_ids=[GUILD_ID])
 async def sklad(ctx, гекс: str, регион: str, склад: str, пароль: str):
     channel_id = get_channel(ctx.guild.id, "sklad")
@@ -419,7 +424,6 @@ async def sklad(ctx, гекс: str, регион: str, склад: str, паро
     await ctx.respond("✅ склад создан", ephemeral=True)
 
 
-# ─── /МПФ ───────────────────────────────────────────────
 @bot.slash_command(name="мпф", guild_ids=[GUILD_ID])
 async def mpf(ctx, что_поставил: str, ящиков: int, days: int = 0, hours: int = 0, minutes: int = 0):
     channel_id = get_channel(ctx.guild.id, "mpf")
