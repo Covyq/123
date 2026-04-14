@@ -85,7 +85,7 @@ def has_access(member):
 def clean_channels():
     for row in ChannelConfig.select():
         guild = bot.get_guild(row.guild_id)
-        if not guild or guild.get_channel(row.channel_id) is None:
+        if not guild or guild.get_channel_or_thread(row.channel_id) is None:
             row.delete_instance()
 
 # VIEWS
@@ -202,14 +202,13 @@ async def loop():
     for t in expired:
         try:
             guild = bot.get_guild(t.guild_id)
-            channel = guild.get_channel(t.channel_id)
+            channel = guild.get_channel_or_thread(t.channel_id)
             msg = await channel.fetch_message(t.message_id)
 
             member = guild.get_member(t.author)
             nickname = member.display_name if member else "пользователь"
             mention = member.mention if member else "пользователь"
 
-            # MPF
             if t.kind == "mpf":
                 item = t.text.split("📦 Что поставил: ")[1].splitlines()[0]
 
@@ -227,7 +226,6 @@ async def loop():
                 t.save()
                 continue
 
-            # TIMER (ИСПРАВЛЕНО)
             if t.kind == "timer":
                 await msg.edit(
                     content=(
@@ -242,7 +240,6 @@ async def loop():
                 t.save()
                 continue
 
-            # SKLAD
             if t.kind == "sklad":
                 await msg.edit(
                     content=f"✅ Склад завершён {nickname}\n⏰ <t:{now}:R>",
@@ -271,6 +268,7 @@ async def on_ready():
         loop.start()
 
 # COMMANDS
+
 @bot.slash_command(name="setskladchannel", guild_ids=[GUILD_ID])
 async def setskladchannel(ctx, channel: discord.TextChannel):
     if not has_access(ctx.author):
@@ -289,13 +287,26 @@ async def setsimpletimer(ctx, channel: discord.TextChannel):
     await ctx.respond("✅ таймер установлен", ephemeral=True)
 
 
+# 🔥 ОБНОВЛЁННАЯ КОМАНДА
 @bot.slash_command(name="setmpf", guild_ids=[GUILD_ID])
-async def setmpf(ctx, channel: discord.TextChannel):
+async def setmpf(ctx, channel: discord.TextChannel = None, thread_id: str = None):
     if not has_access(ctx.author):
         return await ctx.respond("❌ Нет прав", ephemeral=True)
 
-    set_channel(ctx.guild.id, channel.id, "mpf")
-    await ctx.respond("✅ MPF установлен", ephemeral=True)
+    target_id = None
+
+    if channel:
+        target_id = channel.id
+    elif thread_id:
+        try:
+            target_id = int(thread_id)
+        except ValueError:
+            return await ctx.respond("❌ Неверный ID", ephemeral=True)
+    else:
+        return await ctx.respond("❌ Укажи канал или thread_id", ephemeral=True)
+
+    set_channel(ctx.guild.id, target_id, "mpf")
+    await ctx.respond(f"✅ MPF установлен: `{target_id}`", ephemeral=True)
 
 
 @bot.slash_command(name="таймер", guild_ids=[GUILD_ID])
