@@ -105,12 +105,15 @@ def clean_channels():
             row.delete_instance()
 
 
-# ─── VIEWS (PERSISTENT FIXED) ───────────────────────────
+# ─── VIEWS (NO PERSISTENT SYSTEM) ───────────────────────
 class SkladView(View):
     def __init__(self):
-        super().__init__(timeout=None)
+        super().__init__()
 
-    @discord.ui.button(label="Обновить склад", style=discord.ButtonStyle.green, custom_id="sklad_update")
+    async def interaction_check(self, interaction):
+        return True
+
+    @discord.ui.button(label="Обновить склад", style=discord.ButtonStyle.green)
     async def update(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
 
@@ -127,7 +130,7 @@ class SkladView(View):
             view=self
         )
 
-    @discord.ui.button(label="Удалить", style=discord.ButtonStyle.red, custom_id="sklad_delete")
+    @discord.ui.button(label="Удалить", style=discord.ButtonStyle.red)
     async def delete(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
 
@@ -139,9 +142,9 @@ class SkladView(View):
 
 class TimerView(View):
     def __init__(self):
-        super().__init__(timeout=None)
+        super().__init__()
 
-    @discord.ui.button(label="Удалить", style=discord.ButtonStyle.red, custom_id="timer_delete")
+    @discord.ui.button(label="Удалить", style=discord.ButtonStyle.red)
     async def delete(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
 
@@ -152,12 +155,10 @@ class TimerView(View):
 
 
 class MPFView(View):
-    def __init__(self, show_take=False):
-        super().__init__(timeout=None)
+    def __init__(self):
+        super().__init__()
 
-        self.show_take = show_take
-
-    @discord.ui.button(label="Забрал заказ", style=discord.ButtonStyle.green, custom_id="mpf_take")
+    @discord.ui.button(label="Забрал заказ", style=discord.ButtonStyle.green)
     async def take(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
 
@@ -173,7 +174,7 @@ class MPFView(View):
             view=self
         )
 
-    @discord.ui.button(label="Удалить", style=discord.ButtonStyle.red, custom_id="mpf_delete")
+    @discord.ui.button(label="Удалить", style=discord.ButtonStyle.red)
     async def delete(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
 
@@ -233,14 +234,6 @@ async def loop():
 @bot.event
 async def on_ready():
     load_channels()
-
-    bot.add_view(SkladView())
-    bot.add_view(TimerView())
-    bot.add_view(MPFView())
-
-    if not loop.is_running():
-        loop.start()
-
     print(f"Bot online {bot.user}")
 
 
