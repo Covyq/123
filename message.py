@@ -192,12 +192,10 @@ class TimerView(View):
             print(traceback.format_exc())
 
 
-# ─── MPF VIEW (ИЗМЕНЕНО) ───────────────────────────────
+# ─── MPF VIEW ───────────────────────────────────────────
 class MPFView(View):
     def __init__(self, show_take: bool = False):
         super().__init__(timeout=None)
-
-        self.show_take = show_take
 
         if show_take:
             take = Button(label="Забрал заказ", style=discord.ButtonStyle.green, custom_id="mpf_take")
@@ -217,7 +215,7 @@ class MPFView(View):
                 return await interaction.followup.send("❌ Не найден", ephemeral=True)
 
             if row.taken_by:
-                return await interaction.followup.send("❌ Заказ уже забрали", ephemeral=True)
+                return await interaction.followup.send("❌ Уже забрали", ephemeral=True)
 
             row.taken_by = interaction.user.id
             row.save()
@@ -279,15 +277,23 @@ async def loop():
             if t.kind == "mpf":
                 await msg.edit(
                     content=f"✅ ЗАКРЫТО\n{t.text}\n⌛ завершено {mention}",
-                    view=MPFView(show_take=True)   # ← КНОПКА ПОЯВЛЯЕТСЯ ТОЛЬКО ЗДЕСЬ
+                    view=MPFView(show_take=True)
                 )
-            else:
-                await msg.edit(content=f"✅ {t.text} завершён {mention}\n⏰ <t:{now}:R>")
+
+                # 🔥 важно: НЕ удаляем MPF, просто помечаем как обработанный
+                t.time_end = now + 10**9
+                t.save()
+                continue
+
+            await msg.edit(
+                content=f"✅ {t.text} завершён {mention}\n⏰ <t:{now}:R>"
+            )
+
+            t.delete_instance()
 
         except Exception:
             print(traceback.format_exc())
-
-        t.delete_instance()
+            t.delete_instance()
 
 
 # ─── READY ───────────────────────────────────────────────
@@ -309,7 +315,7 @@ async def on_ready():
         loop.start()
 
 
-# ─── CHANNEL COMMANDS ───────────────────────────────────
+# ─── COMMANDS ───────────────────────────────────────────
 @bot.slash_command(name="setskladchannel", guild_ids=[GUILD_ID])
 async def setskladchannel(ctx, channel: discord.TextChannel):
     if not has_access(ctx.author):
@@ -337,10 +343,9 @@ async def setmpf(ctx, channel: discord.TextChannel):
     await ctx.respond("✅ MPF установлен", ephemeral=True)
 
 
-# ─── /ТАЙМЕР ─────────────────────────────────────────────
+# ─── /ТАЙМЕР ───────────────────────────────────────────
 @bot.slash_command(name="таймер", guild_ids=[GUILD_ID])
 async def timer(ctx, название: str, days: int = 0, hours: int = 0, minutes: int = 0):
-
     if days == 0 and hours == 0 and minutes == 0:
         return await ctx.respond("❌ укажи время", ephemeral=True)
 
@@ -372,10 +377,9 @@ async def timer(ctx, название: str, days: int = 0, hours: int = 0, minut
     await ctx.respond("✅ таймер создан", ephemeral=True)
 
 
-# ─── /СКЛАД ──────────────────────────────────────────────
+# ─── /СКЛАД ────────────────────────────────────────────
 @bot.slash_command(name="склад", guild_ids=[GUILD_ID])
 async def sklad(ctx, гекс: str, регион: str, склад: str, пароль: str):
-
     channel_id = get_channel(ctx.guild.id, "sklad")
     if channel_id and ctx.channel.id != channel_id:
         return await ctx.respond("❌ не тот канал", ephemeral=True)
@@ -408,10 +412,9 @@ async def sklad(ctx, гекс: str, регион: str, склад: str, паро
     await ctx.respond("✅ склад создан", ephemeral=True)
 
 
-# ─── /МПФ ────────────────────────────────────────────────
+# ─── /МПФ ───────────────────────────────────────────────
 @bot.slash_command(name="мпф", guild_ids=[GUILD_ID])
 async def mpf(ctx, что_поставил: str, ящиков: int, days: int = 0, hours: int = 0, minutes: int = 0):
-
     channel_id = get_channel(ctx.guild.id, "mpf")
     if not channel_id:
         return await ctx.respond("❌ MPF канал не задан", ephemeral=True)
