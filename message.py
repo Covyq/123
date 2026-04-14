@@ -278,18 +278,9 @@ async def setskladchannel(ctx, channel: discord.TextChannel):
     await ctx.respond("✅ склад установлен", ephemeral=True)
 
 
+# 🔥 ОБНОВЛЁННАЯ ТОЛЬКО ЭТА КОМАНДА
 @bot.slash_command(name="setsimpletimer", guild_ids=[GUILD_ID])
-async def setsimpletimer(ctx, channel: discord.TextChannel):
-    if not has_access(ctx.author):
-        return await ctx.respond("❌ Нет прав", ephemeral=True)
-
-    set_channel(ctx.guild.id, channel.id, "simple")
-    await ctx.respond("✅ таймер установлен", ephemeral=True)
-
-
-# 🔥 ОБНОВЛЁННАЯ КОМАНДА
-@bot.slash_command(name="setmpf", guild_ids=[GUILD_ID])
-async def setmpf(ctx, channel: discord.TextChannel = None, thread_id: str = None):
+async def setsimpletimer(ctx, channel: discord.TextChannel = None, thread_id: str = None):
     if not has_access(ctx.author):
         return await ctx.respond("❌ Нет прав", ephemeral=True)
 
@@ -305,8 +296,17 @@ async def setmpf(ctx, channel: discord.TextChannel = None, thread_id: str = None
     else:
         return await ctx.respond("❌ Укажи канал или thread_id", ephemeral=True)
 
-    set_channel(ctx.guild.id, target_id, "mpf")
-    await ctx.respond(f"✅ MPF установлен: `{target_id}`", ephemeral=True)
+    set_channel(ctx.guild.id, target_id, "simple")
+    await ctx.respond(f"✅ таймер установлен: `{target_id}`", ephemeral=True)
+
+
+@bot.slash_command(name="setmpf", guild_ids=[GUILD_ID])
+async def setmpf(ctx, channel: discord.TextChannel):
+    if not has_access(ctx.author):
+        return await ctx.respond("❌ Нет прав", ephemeral=True)
+
+    set_channel(ctx.guild.id, channel.id, "mpf")
+    await ctx.respond("✅ MPF установлен", ephemeral=True)
 
 
 @bot.slash_command(name="таймер", guild_ids=[GUILD_ID])
