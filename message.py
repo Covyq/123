@@ -25,7 +25,7 @@ DB_PATH = "timers.db"
 CHANNEL_CACHE = {"sklad": {}, "simple": {}, "mpf": {}}
 TIMERS = {}
 
-# ─── DB ────────────────────────────────────────────────
+# ─── DB INIT ────────────────────────────────────────────
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
@@ -55,6 +55,7 @@ def init_db():
     conn.close()
 
 
+# ─── LOAD DATA ───────────────────────────────────────────
 def load_timers():
     global TIMERS
     TIMERS = {}
@@ -145,14 +146,14 @@ def get_channel(guild_id, type_):
     return CHANNEL_CACHE.get(type_, {}).get(guild_id)
 
 
-# ─── PERMISSION ─────────────────────────────────────────
+# ─── PERMISSIONS ────────────────────────────────────────
 def has_access(member):
     return member.guild_permissions.administrator or any(
         r.id in ALLOWED_ROLE_IDS for r in member.roles
     )
 
 
-# ─── TIMER VIEW (без кнопок MPF) ─────────────────────────
+# ─── TIMER VIEW ─────────────────────────────────────────
 class TimerView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -244,7 +245,7 @@ async def checker():
             continue
 
         if t["type"] == "mpf":
-            content = f"{t['text']}\n\n✅ Можно забирать"
+            content = f"{t['text']}\n✅ Можно забирать"
         elif t["type"] == "sklad":
             content = f"{t['text']}\n\n⏰ Склад завершён"
         else:
@@ -309,10 +310,10 @@ async def sklad(ctx, гекс: str, регион: str, склад: str, паро
 
     text = (
         f"👤 {ctx.author.display_name}\n"
-        f"**Гекс:** {гекс}\n"
-        f"**Регион:** {регион}\n"
-        f"**Склад:** {склад}\n"
-        f"**Пароль:** {пароль}"
+        f"📦 {гекс}\n"
+        f"📦 Ящики: {регион}\n"
+        f"📦 Склад: {склад}\n"
+        f"🔑 {пароль}"
     )
 
     msg = await ctx.send(
@@ -358,8 +359,7 @@ async def mpf(ctx, что: str, ящики: int, hours: int = 0, minutes: int = 
     )
 
     msg = await channel.send(
-        f"{text}\n⏰ <t:{end}:R>",
-        view=None
+        f"{text}\n⏰ <t:{end}:R>"
     )
 
     t = {
