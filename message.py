@@ -174,9 +174,10 @@ class MPFView(View):
         row.save()
 
         member = interaction.guild.get_member(interaction.user.id)
+        nickname = member.display_name if member else "пользователь"
 
         await interaction.message.edit(
-            content=interaction.message.content + f"\n\n📦 Забрал: {member.display_name}",
+            content=interaction.message.content + f"\n\n📦 Забрал: {nickname}",
             view=self
         )
 
@@ -207,7 +208,7 @@ async def loop():
             member = guild.get_member(t.author)
             nickname = member.display_name if member else "пользователь"
 
-            # MPF
+            # MPF (ОБНОВЛЁН)
             if t.kind == "mpf":
                 item = t.text.split("📦 Что поставил: ")[1].splitlines()[0]
 
@@ -216,7 +217,7 @@ async def loop():
                         f"👤 Кто поставил: {nickname}\n"
                         f"📦 Что поставил: {item}\n"
                         f"📦 Ящиков: {t.boxes}\n"
-                        f"✅ Статус: выполнено"
+                        f"Статус: ✅"
                     ),
                     view=MPFView(show_take=True)
                 )
@@ -225,7 +226,7 @@ async def loop():
                 t.save()
                 continue
 
-            # TIMER (фикс)
+            # TIMER
             if t.kind == "timer":
                 await msg.edit(
                     content=(
@@ -236,7 +237,7 @@ async def loop():
                     view=TimerView()
                 )
 
-                t.time_end = now + 10**9  # 🔥 фикс
+                t.time_end = now + 10**9
                 t.save()
                 continue
 
@@ -366,23 +367,25 @@ async def mpf(ctx, что_поставил: str, ящиков: int, days: int = 
     if not channel_id or ctx.channel.id != channel_id:
         return await ctx.respond("❌ не тот канал", ephemeral=True)
 
+    end = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=days, hours=hours, minutes=minutes)
+    end_ts = int(end.timestamp())
+
     text = (
         f"👤 Кто поставил: {ctx.author.display_name}\n"
         f"📦 Что поставил: {что_поставил}\n"
         f"📦 Ящиков: {ящиков}\n"
-        f"⌛ Статус: ожидание"
+        f"⌛ <t:{end_ts}:R>\n"
+        f"Статус: ожидание"
     )
 
-    msg = await ctx.send(text, view=MPFView())
-
-    end = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=days, hours=hours, minutes=minutes)
+    msg = await ctx.send(text, view=MPFView(show_take=False))
 
     Timer.create(
         guild_id=ctx.guild.id,
         channel_id=ctx.channel.id,
         message_id=msg.id,
         text=text,
-        time_end=int(end.timestamp()),
+        time_end=end_ts,
         author=ctx.author.id,
         kind="mpf",
         boxes=ящиков,
