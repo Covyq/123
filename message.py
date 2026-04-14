@@ -118,14 +118,30 @@ class TimerView(View):
     )
     async def delete(self, interaction: discord.Interaction, button: discord.ui.Button):
 
-        row = Timer.get_or_none(Timer.message_id == interaction.message.id)
+        try:
+            await interaction.response.defer(ephemeral=True)
 
-        if not row or interaction.user.id != row.author:
-            await interaction.response.send_message("❌ Нет прав", ephemeral=True)
-            return
+            row = Timer.get_or_none(Timer.message_id == interaction.message.id)
 
-        row.delete_instance()
-        await interaction.message.delete()
+            if not row:
+                await interaction.followup.send("❌ Таймер не найден", ephemeral=True)
+                return
+
+            if interaction.user.id != row.author:
+                await interaction.followup.send("❌ Нет прав", ephemeral=True)
+                return
+
+            row.delete_instance()
+
+            try:
+                await interaction.message.delete()
+            except:
+                pass
+
+            await interaction.followup.send("✅ Таймер удалён", ephemeral=True)
+
+        except Exception as e:
+            print("TimerView error:", e)
 
 # ─── VIEW: СКЛАД ──────────────────────────────────────────
 class SkladView(View):
@@ -169,7 +185,13 @@ class SkladView(View):
             return
 
         row.delete_instance()
-        await interaction.message.delete()
+
+        try:
+            await interaction.message.delete()
+        except:
+            pass
+
+        await interaction.response.send_message("✅ Удалено", ephemeral=True)
 
 # ─── LOOP ─────────────────────────────────────────────────
 @tasks.loop(seconds=30)
@@ -244,7 +266,7 @@ async def setsimpletimer(ctx, channel: discord.TextChannel):
     set_channel(ctx.guild.id, channel.id, "simple")
     await ctx.respond(f"✅ Таймер канал: {channel.mention}", ephemeral=True)
 
-# ─── MPF THREAD SET ───────────────────────────────────────
+# ─── MPF THREAD ───────────────────────────────────────────
 @bot.slash_command(name="setmpfchat", guild_ids=[GUILD_ID])
 async def setmpfchat(ctx, thread_id: str):
 
@@ -254,12 +276,11 @@ async def setmpfchat(ctx, thread_id: str):
 
     try:
         thread_id = int(thread_id)
-    except ValueError:
-        await ctx.respond("❌ Введи корректный ID ветки", ephemeral=True)
+    except:
+        await ctx.respond("❌ Неверный ID ветки", ephemeral=True)
         return
 
     set_channel(ctx.guild.id, thread_id, "mpf")
-
     await ctx.respond(f"✅ MPF ветка установлена: `{thread_id}`", ephemeral=True)
 
 # ─── ТАЙМЕР ───────────────────────────────────────────────
@@ -298,9 +319,9 @@ async def timer(ctx, название: str, days: int = 0, hours: int = 0, minut
 
 # ─── MPF ────────────────────────────────────────────────
 @bot.slash_command(name="мпф", guild_ids=[GUILD_ID])
-async def mpf(ctx, что: str, ящики: int, дни: int = 0, часы: int = 0, минуты: int = 0):
+async def mpf(ctx, что: str, ящики: int, days: int = 0, hours: int = 0, minutes: int = 0):
 
-    if дни == 0 and часы == 0 and минуты == 0:
+    if days == 0 and hours == 0 and minutes == 0:
         await ctx.respond("❌ Укажи время", ephemeral=True)
         return
 
@@ -310,13 +331,13 @@ async def mpf(ctx, что: str, ящики: int, дни: int = 0, часы: int 
         await ctx.respond("❌ MPF ветка не настроена", ephemeral=True)
         return
 
-    try:
-        channel = await bot.fetch_channel(channel_id)
-    except:
-        await ctx.respond("❌ Не удалось найти ветку", ephemeral=True)
+    channel = bot.get_channel(channel_id)
+
+    if not channel:
+        await ctx.respond("❌ Ветка не найдена", ephemeral=True)
         return
 
-    end = datetime.datetime.utcnow() + datetime.timedelta(days=дни, hours=часы, minutes=минуты)
+    end = datetime.datetime.utcnow() + datetime.timedelta(days=days, hours=hours, minutes=minutes)
     end_ts = int(end.timestamp())
 
     text = (
