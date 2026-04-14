@@ -55,7 +55,7 @@ def init_db():
     conn.close()
 
 
-# ─── LOAD DATA ──────────────────────────────────────────
+# ─── LOAD ───────────────────────────────────────────────
 def load_timers():
     global TIMERS
     TIMERS = {}
@@ -146,19 +146,23 @@ def get_channel(guild_id, type_):
     return CHANNEL_CACHE.get(type_, {}).get(guild_id)
 
 
-# ─── PERMISSIONS ────────────────────────────────────────
+# ─── PERMISSION ─────────────────────────────────────────
 def has_access(member):
     return member.guild_permissions.administrator or any(
         r.id in ALLOWED_ROLE_IDS for r in member.roles
     )
 
 
-# ─── VIEWS ──────────────────────────────────────────────
+# ─── VIEWS (FIXED PERSISTENT) ───────────────────────────
 class TimerView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="Удалить", style=discord.ButtonStyle.red)
+    @discord.ui.button(
+        label="Удалить",
+        style=discord.ButtonStyle.red,
+        custom_id="timer_delete_btn"
+    )
     async def delete(self, interaction: discord.Interaction):
 
         await interaction.response.defer(ephemeral=True)
@@ -185,7 +189,11 @@ class SkladView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="Обновить склад", style=discord.ButtonStyle.green)
+    @discord.ui.button(
+        label="Обновить склад",
+        style=discord.ButtonStyle.green,
+        custom_id="sklad_update_btn"
+    )
     async def update(self, interaction: discord.Interaction):
 
         t = TIMERS.get(interaction.message.id)
@@ -204,7 +212,11 @@ class SkladView(View):
 
         await interaction.response.send_message("✅ Обновлено", ephemeral=True)
 
-    @discord.ui.button(label="Удалить", style=discord.ButtonStyle.red)
+    @discord.ui.button(
+        label="Удалить",
+        style=discord.ButtonStyle.red,
+        custom_id="sklad_delete_btn"
+    )
     async def delete(self, interaction: discord.Interaction):
 
         t = TIMERS.get(interaction.message.id)
