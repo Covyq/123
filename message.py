@@ -27,30 +27,9 @@ db = None
 
 # ─────────────────────────────────────────────
 # SAFE HELPERS
-async def safe_defer(interaction):
-    try:
-        await interaction.response.defer(ephemeral=True)
-    except:
-        pass
-
-
-async def safe_followup(interaction, text):
-    try:
-        await interaction.followup.send(text, ephemeral=True)
-    except:
-        pass
-
-
 async def safe_edit(message, content):
     try:
         await message.edit(content=content)
-    except:
-        pass
-
-
-async def safe_delete(message):
-    try:
-        await message.delete()
     except:
         pass
 
@@ -93,18 +72,17 @@ async def load_state():
     CHANNELS.clear()
 
     async with db.execute("SELECT * FROM timers") as cur:
-        rows = await cur.fetchall()
-
-    for msg_id, guild_id, channel_id, author, text, end, type_ in rows:
-        TIMERS[msg_id] = {
-            "message_id": msg_id,
-            "guild_id": guild_id,
-            "channel_id": channel_id,
-            "author": author,
-            "text": text,
-            "time_end": end,
-            "type": type_
-        }
+        for row in await cur.fetchall():
+            msg_id, guild_id, channel_id, author, text, end, type_ = row
+            TIMERS[msg_id] = {
+                "message_id": msg_id,
+                "guild_id": guild_id,
+                "channel_id": channel_id,
+                "author": author,
+                "text": text,
+                "time_end": end,
+                "type": type_
+            }
 
     async with db.execute("SELECT guild_id, type, channel_id FROM channels") as cur:
         for g, t, c in await cur.fetchall():
@@ -162,44 +140,7 @@ async def delete_timer(msg_id):
 
 
 # ─────────────────────────────────────────────
-# BUTTONS (FIXED + STABLE)
-class GlobalView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-
-    @discord.ui.button(label="Удалить", style=discord.ButtonStyle.red, custom_id="del")
-    async def delete(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await safe_defer(interaction)
-
-        try:
-            await delete_timer(interaction.message.id)
-            await safe_delete(interaction.message)
-            await safe_followup(interaction, "✅ удалено")
-        except Exception as e:
-            print("BUTTON DELETE ERROR:", e)
-
-
-    @discord.ui.button(label="Обновить склад", style=discord.ButtonStyle.green, custom_id="skl")
-    async def sklad(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await safe_defer(interaction)
-
-        try:
-            new_end = int(time.time()) + 172800
-            base = interaction.message.content.split("\n⏰")[0]
-
-            await safe_edit(
-                interaction.message,
-                f"{base}\n\n⏰ обновлено 48ч (<t:{new_end}:R>)"
-            )
-
-            await safe_followup(interaction, "✅ обновлено")
-
-        except Exception as e:
-            print("BUTTON SKLAD ERROR:", e)
-
-
-# ─────────────────────────────────────────────
-# SCHEDULER
+# SCHEDULER (NO BUTTON VERSION)
 async def scheduler():
     while True:
         try:
@@ -245,8 +186,6 @@ async def on_ready():
     await init_db()
     await load_state()
 
-    bot.add_view(GlobalView())
-
     asyncio.create_task(scheduler())
 
 
@@ -259,8 +198,7 @@ async def timer(ctx, название: str, hours: int = 0, minutes: int = 0):
     end = int(time.time()) + hours * 3600 + minutes * 60
 
     msg = await ctx.send(
-        f"👤 {ctx.author.mention}\n📌 {название}\n⏰ <t:{end}:R>",
-        view=GlobalView()
+        f"👤 {ctx.author.mention}\n📌 {название}\n⏰ <t:{end}:R>"
     )
 
     await save_timer({
@@ -290,8 +228,7 @@ async def sklad(ctx, гекс: str, регион: str, склад: str, паро
     )
 
     msg = await ctx.send(
-        f"{text}\n\n⏰ 48ч (<t:{end}:R>)",
-        view=GlobalView()
+        f"{text}\n\n⏰ 48ч (<t:{end}:R>)"
     )
 
     await save_timer({
@@ -337,6 +274,8 @@ async def mpf(ctx, что: str, ящики: int, hours: int = 0):
 
 
 # ─────────────────────────────────────────────
+# ADMIN COMMANDS
+
 @bot.slash_command(guild_ids=[GUILD_ID], name="setmpf")
 async def setmpf(ctx, channel: discord.TextChannel):
     if not has_access(ctx.author):
