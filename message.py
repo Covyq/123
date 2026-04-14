@@ -121,7 +121,18 @@ class TimerView(View):
         try:
             await interaction.response.defer(ephemeral=True)
 
-            row = Timer.get_or_none(Timer.message_id == interaction.message.id)
+            message = None
+
+            try:
+                message = interaction.message
+            except:
+                message = await interaction.channel.fetch_message(interaction.message.id)
+
+            if not message:
+                await interaction.followup.send("❌ Сообщение не найдено", ephemeral=True)
+                return
+
+            row = Timer.get_or_none(Timer.message_id == message.id)
 
             if not row:
                 await interaction.followup.send("❌ Таймер не найден", ephemeral=True)
@@ -134,14 +145,14 @@ class TimerView(View):
             row.delete_instance()
 
             try:
-                await interaction.message.delete()
+                await message.delete()
             except:
                 pass
 
             await interaction.followup.send("✅ Таймер удалён", ephemeral=True)
 
         except Exception as e:
-            print("TimerView error:", e)
+            print("Timer delete error:", e)
 
 # ─── VIEW: СКЛАД ──────────────────────────────────────────
 class SkladView(View):
@@ -208,7 +219,14 @@ async def loop():
             if not channel:
                 continue
 
-            msg = await channel.fetch_message(t.message_id)
+            try:
+                msg = await channel.fetch_message(t.message_id)
+            except:
+                msg = None
+
+            if not msg:
+                t.delete_instance()
+                continue
 
             if t.type == "mpf":
                 content = f"{t.text}\n\n✅ Можно забирать"
@@ -266,7 +284,7 @@ async def setsimpletimer(ctx, channel: discord.TextChannel):
     set_channel(ctx.guild.id, channel.id, "simple")
     await ctx.respond(f"✅ Таймер канал: {channel.mention}", ephemeral=True)
 
-# ─── MPF THREAD ───────────────────────────────────────────
+
 @bot.slash_command(name="setmpfchat", guild_ids=[GUILD_ID])
 async def setmpfchat(ctx, thread_id: str):
 
