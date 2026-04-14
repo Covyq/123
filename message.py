@@ -192,7 +192,7 @@ class TimerView(View):
             print(traceback.format_exc())
 
 
-# ─── MPF VIEW (FIXED) ───────────────────────────────────
+# ─── MPF VIEW ───────────────────────────────────────────
 class MPFView(View):
     def __init__(self, show_take: bool = False):
         super().__init__(timeout=None)
@@ -282,6 +282,7 @@ async def loop():
             member = guild.get_member(t.author)
             mention = member.mention if member else "пользователь"
 
+            # MPF
             if t.kind == "mpf":
                 item = t.text.split("📦 Что поставил: ")[1].splitlines()[0]
 
@@ -299,11 +300,28 @@ async def loop():
                 t.save()
                 continue
 
-            await msg.edit(
-                content=f"✅ {t.text} завершён {mention}\n⏰ <t:{now}:R>"
-            )
+            # TIMER (ИСПРАВЛЕН)
+            if t.kind == "timer":
+                await msg.edit(
+                    content=(
+                        f"👤 {mention}\n"
+                        f"📌 {t.text}\n"
+                        f"✅ Статус: выполнено"
+                    ),
+                    view=None
+                )
 
-            t.delete_instance()
+                t.delete_instance()
+                continue
+
+            # SKLAD
+            if t.kind == "sklad":
+                await msg.edit(
+                    content=f"✅ Склад завершён {mention}\n⏰ <t:{now}:R>",
+                    view=None
+                )
+
+                t.delete_instance()
 
         except Exception:
             print(traceback.format_exc())
