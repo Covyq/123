@@ -25,7 +25,7 @@ DB_PATH = "timers.db"
 CHANNEL_CACHE = {"sklad": {}, "simple": {}, "mpf": {}}
 TIMERS = {}
 
-# ─── DB INIT ────────────────────────────────────────────
+# ─── DB ────────────────────────────────────────────────
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
@@ -55,7 +55,6 @@ def init_db():
     conn.close()
 
 
-# ─── LOAD ───────────────────────────────────────────────
 def load_timers():
     global TIMERS
     TIMERS = {}
@@ -153,7 +152,7 @@ def has_access(member):
     )
 
 
-# ─── VIEWS (FIXED PERSISTENT) ───────────────────────────
+# ─── VIEWS (PERSISTENT SAFE) ────────────────────────────
 class TimerView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -289,8 +288,7 @@ async def on_ready():
     load_timers()
     load_channels()
 
-    bot.add_view(TimerView())
-    bot.add_view(SkladView())
+    # ❗ ВАЖНО: НЕТ bot.add_view()
 
     if not checker.is_running():
         checker.start()
@@ -429,12 +427,7 @@ async def setmpfchat(ctx, thread_id: str):
     if not has_access(ctx.author):
         return await ctx.respond("❌ Нет прав", ephemeral=True)
 
-    try:
-        thread_id = int(thread_id)
-    except:
-        return await ctx.respond("❌ Неверный ID", ephemeral=True)
-
-    set_channel_db(ctx.guild.id, "mpf", thread_id)
+    set_channel_db(ctx.guild.id, "mpf", int(thread_id))
     await ctx.respond("✅ MPF канал установлен", ephemeral=True)
 
 
