@@ -53,6 +53,7 @@ class Timer(BaseModel):
 db.connect(reuse_if_open=True)
 db.create_tables([ChannelConfig, Timer])
 
+
 # ─── CHANNEL SYSTEM ──────────────────────────────────────
 def load_channels():
     global CHANNEL_CACHE
@@ -219,8 +220,12 @@ async def loop():
             member = guild.get_member(t.author)
             name = member.display_name if member else "неизвестный"
 
+            # ─── MPF ─────────────────────────────
             if t.kind == "mpf":
-                what = t.text.split("Что:")[-1].strip() if "Что:" in t.text else "неизвестно"
+                what = "неизвестно"
+
+                if "Что:" in t.text:
+                    what = t.text.split("Что:")[-1].strip()
 
                 await msg.edit(
                     content=
@@ -231,10 +236,12 @@ async def loop():
                     view=MPFView(show_take=True)
                 )
 
+                # оставляем запись чтобы кнопки работали
                 t.time_end = now + 10**9
                 t.save()
                 continue
 
+            # ─── SIMPLE TIMER ────────────────────
             await msg.edit(content=f"✅ {t.text} завершён {name}")
             t.delete_instance()
 
@@ -247,6 +254,7 @@ async def loop():
 @bot.event
 async def on_ready():
     load_channels()
+
     bot.add_view(SkladView())
     bot.add_view(TimerView())
     bot.add_view(MPFView())
@@ -257,14 +265,14 @@ async def on_ready():
     print(f"Bot online {bot.user}")
 
 
-# ─── CHANNEL COMMANDS (ВОССТАНОВЛЕНО) ───────────────────
+# ─── CHANNEL COMMANDS ───────────────────────────────────
 @bot.slash_command(name="setskladchannel", guild_ids=[GUILD_ID])
 async def setskladchannel(ctx, channel: discord.TextChannel):
     if not has_access(ctx.author):
         return await ctx.respond("❌ нет прав", ephemeral=True)
 
     set_channel(ctx.guild.id, channel.id, "sklad")
-    await ctx.respond("✅ склад канал установлен", ephemeral=True)
+    await ctx.respond("✅ склад установлен", ephemeral=True)
 
 
 @bot.slash_command(name="setsimpletimer", guild_ids=[GUILD_ID])
@@ -273,7 +281,7 @@ async def setsimpletimer(ctx, channel: discord.TextChannel):
         return await ctx.respond("❌ нет прав", ephemeral=True)
 
     set_channel(ctx.guild.id, channel.id, "simple")
-    await ctx.respond("✅ таймер канал установлен", ephemeral=True)
+    await ctx.respond("✅ таймер установлен", ephemeral=True)
 
 
 @bot.slash_command(name="setmpf", guild_ids=[GUILD_ID])
@@ -282,7 +290,7 @@ async def setmpf(ctx, channel: discord.TextChannel):
         return await ctx.respond("❌ нет прав", ephemeral=True)
 
     set_channel(ctx.guild.id, channel.id, "mpf")
-    await ctx.respond("✅ MPF канал установлен", ephemeral=True)
+    await ctx.respond("✅ MPF установлен", ephemeral=True)
 
 
 # ─── RUN ────────────────────────────────────────────────
