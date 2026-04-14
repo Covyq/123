@@ -1,3 +1,2 @@
 peewee
 py-cord
-aiosqlite
