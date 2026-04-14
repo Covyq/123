@@ -6,7 +6,7 @@ from discord.ext import tasks
 from discord.ui import View, Button
 from peewee import *
 
-# ─── CONFIG ─────────────────────────────────────────────
+# CONFIG
 GUILD_ID = 419565206335651840
 
 ALLOWED_ROLE_IDS = [
@@ -18,20 +18,18 @@ ALLOWED_ROLE_IDS = [
 bot = discord.Bot(intents=discord.Intents.all(), debug_guilds=[GUILD_ID])
 db = SqliteDatabase("TimerDataBase.db")
 
-# ─── CACHE ───────────────────────────────────────────────
+# CACHE
 CHANNEL_CACHE = {"sklad": {}, "simple": {}, "mpf": {}}
 
-# ─── DB ──────────────────────────────────────────────────
+# DB
 class BaseModel(Model):
     class Meta:
         database = db
-
 
 class ChannelConfig(BaseModel):
     guild_id = BigIntegerField()
     channel_id = BigIntegerField()
     channel_type = TextField()
-
 
 class Timer(BaseModel):
     guild_id = BigIntegerField()
@@ -45,19 +43,16 @@ class Timer(BaseModel):
     boxes = IntegerField(null=True)
     taken_by = BigIntegerField(null=True)
 
-
 db.connect(reuse_if_open=True)
 db.create_tables([ChannelConfig, Timer])
 
-# ─── CHANNELS ───────────────────────────────────────────
+# CHANNELS
 def load_channels():
     global CHANNEL_CACHE
     CHANNEL_CACHE = {"sklad": {}, "simple": {}, "mpf": {}}
-
     for row in ChannelConfig.select():
         CHANNEL_CACHE.setdefault(row.channel_type, {})
         CHANNEL_CACHE[row.channel_type][row.guild_id] = row.channel_id
-
 
 def set_channel(guild_id, channel_id, channel_type):
     row = ChannelConfig.get_or_none(
@@ -77,24 +72,23 @@ def set_channel(guild_id, channel_id, channel_type):
 
     CHANNEL_CACHE.setdefault(channel_type, {})[guild_id] = channel_id
 
-
 def get_channel(guild_id, channel_type):
     return CHANNEL_CACHE.get(channel_type, {}).get(guild_id)
 
-# ─── PERMS ──────────────────────────────────────────────
+# PERMS
 def has_access(member):
     return member.guild_permissions.administrator or any(
         r.id in ALLOWED_ROLE_IDS for r in member.roles
     )
 
-# ─── CLEAN ──────────────────────────────────────────────
+# CLEAN
 def clean_channels():
     for row in ChannelConfig.select():
         guild = bot.get_guild(row.guild_id)
         if not guild or guild.get_channel(row.channel_id) is None:
             row.delete_instance()
 
-# ─── VIEWS ──────────────────────────────────────────────
+# VIEWS
 class SkladView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -134,7 +128,6 @@ class SkladView(View):
         row.delete_instance()
         await interaction.message.delete()
 
-
 class TimerView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -152,7 +145,6 @@ class TimerView(View):
 
         row.delete_instance()
         await interaction.message.delete()
-
 
 class MPFView(View):
     def __init__(self, show_take=False):
@@ -200,7 +192,7 @@ class MPFView(View):
         row.delete_instance()
         await interaction.message.delete()
 
-# ─── LOOP ───────────────────────────────────────────────
+# LOOP
 @tasks.loop(seconds=30)
 async def loop():
     now = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
@@ -233,7 +225,7 @@ async def loop():
                 t.save()
                 continue
 
-            # TIMER (исправленный)
+            # TIMER (фикс)
             if t.kind == "timer":
                 await msg.edit(
                     content=(
@@ -244,7 +236,8 @@ async def loop():
                     view=TimerView()
                 )
 
-                t.delete_instance()
+                t.time_end = now + 10**9  # 🔥 фикс
+                t.save()
                 continue
 
             # SKLAD
@@ -260,7 +253,7 @@ async def loop():
             print(traceback.format_exc())
             t.delete_instance()
 
-# ─── READY ───────────────────────────────────────────────
+# READY
 @bot.event
 async def on_ready():
     print(f"Bot online {bot.user}")
@@ -275,7 +268,7 @@ async def on_ready():
     if not loop.is_running():
         loop.start()
 
-# ─── COMMANDS ───────────────────────────────────────────
+# COMMANDS
 @bot.slash_command(name="setskladchannel", guild_ids=[GUILD_ID])
 async def setskladchannel(ctx, channel: discord.TextChannel):
     if not has_access(ctx.author):
@@ -398,5 +391,6 @@ async def mpf(ctx, что_поставил: str, ящиков: int, days: int = 
 
     await ctx.respond("✅ MPF создан", ephemeral=True)
 
-# ─── RUN ────────────────────────────────────────────────
+
+# RUN
 bot.run(os.environ.get("DISCORD_BOT_TOKEN"))
