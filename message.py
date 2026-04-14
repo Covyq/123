@@ -207,8 +207,9 @@ async def loop():
 
             member = guild.get_member(t.author)
             nickname = member.display_name if member else "пользователь"
+            mention = member.mention if member else "пользователь"
 
-            # MPF (ОБНОВЛЁН)
+            # MPF
             if t.kind == "mpf":
                 item = t.text.split("📦 Что поставил: ")[1].splitlines()[0]
 
@@ -226,11 +227,11 @@ async def loop():
                 t.save()
                 continue
 
-            # TIMER
+            # TIMER (ИСПРАВЛЕНО)
             if t.kind == "timer":
                 await msg.edit(
                     content=(
-                        f"👤 {nickname}\n"
+                        f"👤 {mention}\n"
                         f"📌 {t.text}\n"
                         f"✅ Статус: выполнено"
                     ),
@@ -310,7 +311,7 @@ async def timer(ctx, название: str, days: int = 0, hours: int = 0, minut
     end_ts = int(end.timestamp())
 
     msg = await ctx.send(
-        f"👤 {ctx.author.display_name}\n📌 {название}\n⏰ <t:{end_ts}:R>",
+        f"👤 {ctx.author.mention}\n📌 {название}\n⏰ <t:{end_ts}:R>",
         view=TimerView()
     )
 
