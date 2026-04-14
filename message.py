@@ -1,6 +1,6 @@
 import os
 import time
-import sqlite3
+import aiosqlite
 import discord
 from discord.ext import tasks
 from discord.ui import View
@@ -14,132 +14,87 @@ ALLOWED_ROLE_IDS = [
     987654321098765432
 ]
 
+DB_PATH = "timers.db"
+
 bot = discord.Bot(
     intents=discord.Intents.all(),
     debug_guilds=[GUILD_ID]
 )
 
-DB_PATH = "timers.db"
-
-# ─── MEMORY ─────────────────────────────────────────────
+# ─── MEMORY CACHE ───────────────────────────────────────
 CHANNEL_CACHE = {"sklad": {}, "simple": {}, "mpf": {}}
-TIMERS = {}
 
 # ─── DB INIT ────────────────────────────────────────────
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
+async def init_db():
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS timers (
+            message_id INTEGER PRIMARY KEY,
+            guild_id INTEGER,
+            channel_id INTEGER,
+            author INTEGER,
+            text TEXT,
+            time_end INTEGER,
+            type TEXT
+        )
+        """)
 
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS timers (
-        message_id INTEGER PRIMARY KEY,
-        guild_id INTEGER,
-        channel_id INTEGER,
-        author INTEGER,
-        text TEXT,
-        time_end INTEGER,
-        type TEXT
-    )
-    """)
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS channels (
+            guild_id INTEGER,
+            type TEXT,
+            channel_id INTEGER,
+            PRIMARY KEY (guild_id, type)
+        )
+        """)
 
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS channels (
-        guild_id INTEGER,
-        type TEXT,
-        channel_id INTEGER,
-        PRIMARY KEY (guild_id, type)
-    )
-    """)
-
-    conn.commit()
-    conn.close()
-
-
-# ─── LOAD DATA ───────────────────────────────────────────
-def load_timers():
-    global TIMERS
-    TIMERS = {}
-
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-
-    for row in cur.execute("SELECT * FROM timers"):
-        TIMERS[row[0]] = {
-            "message_id": row[0],
-            "guild_id": row[1],
-            "channel_id": row[2],
-            "author": row[3],
-            "text": row[4],
-            "time_end": row[5],
-            "type": row[6],
-        }
-
-    conn.close()
-
-
-def load_channels():
-    CHANNEL_CACHE["sklad"] = {}
-    CHANNEL_CACHE["simple"] = {}
-    CHANNEL_CACHE["mpf"] = {}
-
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-
-    for guild_id, type_, channel_id in cur.execute(
-        "SELECT guild_id, type, channel_id FROM channels"
-    ):
-        CHANNEL_CACHE[type_][guild_id] = channel_id
-
-    conn.close()
+        await db.commit()
 
 
 # ─── DB HELPERS ─────────────────────────────────────────
-def save_timer(t):
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-
-    cur.execute("""
-    INSERT OR REPLACE INTO timers
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, (
-        t["message_id"],
-        t["guild_id"],
-        t["channel_id"],
-        t["author"],
-        t["text"],
-        t["time_end"],
-        t["type"]
-    ))
-
-    conn.commit()
-    conn.close()
+async def save_timer(t):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+        INSERT OR REPLACE INTO timers
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (
+            t["message_id"],
+            t["guild_id"],
+            t["channel_id"],
+            t["author"],
+            t["text"],
+            t["time_end"],
+            t["type"]
+        ))
+        await db.commit()
 
 
-def delete_timer(message_id):
-    TIMERS.pop(message_id, None)
+async def delete_timer(message_id):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM timers WHERE message_id=?", (message_id,))
+        await db.commit()
 
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("DELETE FROM timers WHERE message_id=?", (message_id,))
-    conn.commit()
-    conn.close()
+
+async def get_all_timers():
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT * FROM timers") as cursor:
+            return await cursor.fetchall()
 
 
 def set_channel_db(guild_id, type_, channel_id):
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-
-    cur.execute("""
-    INSERT INTO channels (guild_id, type, channel_id)
-    VALUES (?, ?, ?)
-    ON CONFLICT(guild_id, type)
-    DO UPDATE SET channel_id=excluded.channel_id
-    """, (guild_id, type_, channel_id))
-
-    conn.commit()
-    conn.close()
-
     CHANNEL_CACHE[type_][guild_id] = channel_id
+
+    async def _save():
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("""
+            INSERT INTO channels (guild_id, type, channel_id)
+            VALUES (?, ?, ?)
+            ON CONFLICT(guild_id, type)
+            DO UPDATE SET channel_id=excluded.channel_id
+            """, (guild_id, type_, channel_id))
+            await db.commit()
+
+    bot.loop.create_task(_save())
 
 
 def get_channel(guild_id, type_):
@@ -153,7 +108,7 @@ def has_access(member):
     )
 
 
-# ─── TIMER VIEW ─────────────────────────────────────────
+# ─── VIEWS ───────────────────────────────────────────────
 class TimerView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -163,19 +118,11 @@ class TimerView(View):
         style=discord.ButtonStyle.red,
         custom_id="timer_delete_btn"
     )
-    async def delete(self, interaction: discord.Interaction):
+    async def delete(self, interaction: discord.Interaction, button: discord.ui.Button):
 
         await interaction.response.defer(ephemeral=True)
 
-        t = TIMERS.get(interaction.message.id)
-
-        if not t:
-            return await interaction.followup.send("❌ Не найдено", ephemeral=True)
-
-        if interaction.user.id != t["author"]:
-            return await interaction.followup.send("❌ Нет прав", ephemeral=True)
-
-        delete_timer(interaction.message.id)
+        await delete_timer(interaction.message.id)
 
         try:
             await interaction.message.delete()
@@ -185,7 +132,6 @@ class TimerView(View):
         await interaction.followup.send("✅ Удалено", ephemeral=True)
 
 
-# ─── SKLAD VIEW ─────────────────────────────────────────
 class SkladView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -195,71 +141,58 @@ class SkladView(View):
         style=discord.ButtonStyle.green,
         custom_id="sklad_update_btn"
     )
-    async def update(self, interaction: discord.Interaction):
+    async def update(self, interaction: discord.Interaction, button: discord.ui.Button):
 
         await interaction.response.defer(ephemeral=True)
 
-        t = TIMERS.get(interaction.message.id)
-
-        if not t:
-            return await interaction.followup.send("❌ Не найдено", ephemeral=True)
-
         new_end = int(time.time()) + 48 * 3600
-        t["time_end"] = new_end
 
-        save_timer(t)
+        content = interaction.message.content.split("\n⏰")[0]
 
         await interaction.message.edit(
-            content=f"{t['text']}\n\n⏰ Обновлено: 48 часов (<t:{new_end}:R>)"
+            content=f"{content}\n\n⏰ Обновлено: 48 часов (<t:{new_end}:R>)"
         )
 
         await interaction.followup.send("✅ Обновлено", ephemeral=True)
 
 
-# ─── LOOP ───────────────────────────────────────────────
+# ─── CHECKER LOOP ───────────────────────────────────────
 @tasks.loop(seconds=5)
 async def checker():
 
     now = int(time.time())
-    remove = []
+    timers = await get_all_timers()
 
-    for msg_id, t in list(TIMERS.items()):
+    for t in timers:
+        msg_id, guild_id, channel_id, author, text, time_end, type_ = t
 
-        if t["time_end"] > now:
+        if time_end > now:
             continue
 
-        guild = bot.get_guild(t["guild_id"])
-        channel = bot.get_channel(t["channel_id"])
-
-        if not guild or not channel:
-            remove.append(msg_id)
+        channel = bot.get_channel(channel_id)
+        if not channel:
+            await delete_timer(msg_id)
             continue
 
         try:
             msg = await channel.fetch_message(msg_id)
         except:
-            msg = None
-
-        if not msg:
-            remove.append(msg_id)
+            await delete_timer(msg_id)
             continue
 
-        if t["type"] == "mpf":
-            content = f"{t['text']}\n✅ Можно забирать"
-        elif t["type"] == "sklad":
-            content = f"{t['text']}\n\n⏰ Склад завершён"
+        if type_ == "mpf":
+            content = f"{text}\n✅ Можно забирать"
+        elif type_ == "sklad":
+            content = f"{text}\n\n⏰ Склад завершён"
         else:
-            content = f"✅ {t['text']} завершён"
+            content = f"✅ {text} завершён"
 
         try:
             await msg.edit(content=content)
         except:
             pass
 
-        remove.append(msg_id)
-
-    for i in remove:
-        delete_timer(i)
+        await delete_timer(msg_id)
 
 
 # ─── READY ──────────────────────────────────────────────
@@ -267,9 +200,10 @@ async def checker():
 async def on_ready():
     print(f"✅ Logged in as {bot.user}")
 
-    init_db()
-    load_timers()
-    load_channels()
+    await init_db()
+
+    bot.add_view(TimerView())
+    bot.add_view(SkladView())
 
     if not checker.is_running():
         checker.start()
@@ -287,7 +221,7 @@ async def timer(ctx, название: str, hours: int = 0, minutes: int = 0):
         view=TimerView()
     )
 
-    t = {
+    await save_timer({
         "message_id": msg.id,
         "guild_id": ctx.guild.id,
         "channel_id": ctx.channel.id,
@@ -295,10 +229,7 @@ async def timer(ctx, название: str, hours: int = 0, minutes: int = 0):
         "text": название,
         "time_end": end,
         "type": "simple"
-    }
-
-    TIMERS[msg.id] = t
-    save_timer(t)
+    })
 
     await ctx.respond("✅ Таймер создан", ephemeral=True)
 
@@ -321,7 +252,7 @@ async def sklad(ctx, гекс: str, регион: str, склад: str, паро
         view=SkladView()
     )
 
-    t = {
+    await save_timer({
         "message_id": msg.id,
         "guild_id": ctx.guild.id,
         "channel_id": ctx.channel.id,
@@ -329,10 +260,7 @@ async def sklad(ctx, гекс: str, регион: str, склад: str, паро
         "text": text,
         "time_end": end,
         "type": "sklad"
-    }
-
-    TIMERS[msg.id] = t
-    save_timer(t)
+    })
 
     await ctx.respond("✅ Склад создан", ephemeral=True)
 
@@ -358,11 +286,9 @@ async def mpf(ctx, что: str, ящики: int, hours: int = 0, minutes: int = 
         f"📦 Ящики: {ящики}"
     )
 
-    msg = await channel.send(
-        f"{text}\n⏰ <t:{end}:R>"
-    )
+    msg = await channel.send(f"{text}\n⏰ <t:{end}:R>")
 
-    t = {
+    await save_timer({
         "message_id": msg.id,
         "guild_id": ctx.guild.id,
         "channel_id": channel.id,
@@ -370,10 +296,7 @@ async def mpf(ctx, что: str, ящики: int, hours: int = 0, minutes: int = 
         "text": text,
         "time_end": end,
         "type": "mpf"
-    }
-
-    TIMERS[msg.id] = t
-    save_timer(t)
+    })
 
     await ctx.respond("✅ MPF создан", ephemeral=True)
 
