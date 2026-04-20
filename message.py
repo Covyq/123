@@ -43,19 +43,16 @@ class Timer(BaseModel):
     boxes = IntegerField(null=True)
     taken_by = BigIntegerField(null=True)
 
-
 db.connect(reuse_if_open=True)
 db.create_tables([ChannelConfig, Timer])
 
 # CHANNELS
-
 def load_channels():
     global CHANNEL_CACHE
     CHANNEL_CACHE = {"sklad": {}, "simple": {}, "mpf": {}}
     for row in ChannelConfig.select():
         CHANNEL_CACHE.setdefault(row.channel_type, {})
         CHANNEL_CACHE[row.channel_type][row.guild_id] = row.channel_id
-
 
 def set_channel(guild_id, channel_id, channel_type):
     row = ChannelConfig.get_or_none(
@@ -73,19 +70,16 @@ def set_channel(guild_id, channel_id, channel_type):
 
     CHANNEL_CACHE.setdefault(channel_type, {})[guild_id] = channel_id
 
-
 def get_channel(guild_id, channel_type):
     return CHANNEL_CACHE.get(channel_type, {}).get(guild_id)
 
 # PERMS
-
 def has_access(member):
     return member.guild_permissions.administrator or any(
         r.id in ALLOWED_ROLE_IDS for r in member.roles
     )
 
 # CLEAN
-
 def clean_channels():
     for row in ChannelConfig.select():
         guild = bot.get_guild(row.guild_id)
@@ -120,8 +114,17 @@ class SkladView(View):
         row.time_end = new_end
         row.save()
 
+        member = interaction.guild.get_member(interaction.user.id)
+        nickname = member.display_name if member else "пользователь"
+
+        updated_text = (
+            f"{row.text}\n\n"
+            f"⏰ До окончания: <t:{new_end}:R>\n\n"
+            f"🔄 Обновил склад - {nickname}"
+        )
+
         await interaction.message.edit(
-            content=f"{row.text}\n\n⏰ До окончания: <t:{new_end}:R>",
+            content=updated_text,
             view=self
         )
 
@@ -203,11 +206,9 @@ class MPFView(View):
         await interaction.message.delete()
 
 # LOOP
-
 @tasks.loop(seconds=30)
 async def loop():
     now = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
-
     expired = Timer.select().where(Timer.time_end < now)
 
     for t in expired:
@@ -256,7 +257,6 @@ async def loop():
                     content=f"✅ Склад завершён {nickname}\n⏰ <t:{now}:R>",
                     view=None
                 )
-
                 t.delete_instance()
 
         except Exception:
@@ -264,7 +264,6 @@ async def loop():
             t.delete_instance()
 
 # READY
-
 @bot.event
 async def on_ready():
     print(f"Bot online {bot.user}")
@@ -434,5 +433,4 @@ async def mpf(ctx, что_поставил: str, ящиков: int, days: int = 
     await ctx.respond("✅ MPF создан", ephemeral=True)
 
 # RUN
-
 bot.run(os.environ.get("DISCORD_BOT_TOKEN"))
