@@ -67,7 +67,6 @@ def set_channel(guild_id, channel_id, channel_type):
             channel_id=channel_id,
             channel_type=channel_type
         )
-
     CHANNEL_CACHE.setdefault(channel_type, {})[guild_id] = channel_id
 
 def get_channel(guild_id, channel_type):
@@ -123,10 +122,7 @@ class SkladView(View):
             f"🔄 Обновил склад - {nickname}"
         )
 
-        await interaction.message.edit(
-            content=updated_text,
-            view=self
-        )
+        await interaction.message.edit(content=updated_text, view=self)
 
     async def delete(self, interaction):
         await interaction.response.defer()
@@ -142,18 +138,15 @@ class SkladView(View):
 class TimerView(View):
     def __init__(self):
         super().__init__(timeout=None)
-
         btn = Button(label="Удалить таймер", style=discord.ButtonStyle.red, custom_id="timer_delete")
         btn.callback = self.delete
         self.add_item(btn)
 
     async def delete(self, interaction):
         await interaction.response.defer()
-
         row = Timer.get_or_none(Timer.message_id == interaction.message.id)
         if not row or interaction.user.id != row.author:
             return await interaction.followup.send("❌ Только автор", ephemeral=True)
-
         row.delete_instance()
         await interaction.message.delete()
 
@@ -166,18 +159,13 @@ class MPFView(View):
         delete.callback = self.delete
         self.add_item(delete)
 
-        take = Button(
-            label="Забрал заказ",
-            style=discord.ButtonStyle.green,
-            custom_id="mpf_take",
-            disabled=not show_take
-        )
+        take = Button(label="Забрал заказ", style=discord.ButtonStyle.green,
+                      custom_id="mpf_take", disabled=not show_take)
         take.callback = self.take
         self.add_item(take)
 
     async def take(self, interaction):
         await interaction.response.defer()
-
         row = Timer.get_or_none(Timer.message_id == interaction.message.id)
         if not row or row.taken_by:
             return await interaction.followup.send("❌ Уже забрали", ephemeral=True)
@@ -197,11 +185,9 @@ class MPFView(View):
 
     async def delete(self, interaction):
         await interaction.response.defer()
-
         row = Timer.get_or_none(Timer.message_id == interaction.message.id)
         if not row or interaction.user.id != row.author:
             return await interaction.followup.send("❌ Только автор", ephemeral=True)
-
         row.delete_instance()
         await interaction.message.delete()
 
@@ -214,8 +200,20 @@ async def loop():
     for t in expired:
         try:
             guild = bot.get_guild(t.guild_id)
+            if not guild:
+                t.delete_instance()
+                continue
+
             channel = guild.get_channel_or_thread(t.channel_id)
-            msg = await channel.fetch_message(t.message_id)
+            if not channel:
+                t.delete_instance()
+                continue
+
+            try:
+                msg = await channel.fetch_message(t.message_id)
+            except discord.NotFound:
+                t.delete_instance()
+                continue
 
             member = guild.get_member(t.author)
             nickname = member.display_name if member else "пользователь"
@@ -223,7 +221,6 @@ async def loop():
 
             if t.kind == "mpf":
                 item = t.text.split("📦 Что поставил: ")[1].splitlines()[0]
-
                 await msg.edit(
                     content=(
                         f"👤 Кто поставил: {nickname}\n"
@@ -233,7 +230,6 @@ async def loop():
                     ),
                     view=MPFView(show_take=True)
                 )
-
                 t.time_end = now + 10**9
                 t.save()
                 continue
@@ -247,7 +243,6 @@ async def loop():
                     ),
                     view=TimerView()
                 )
-
                 t.time_end = now + 10**9
                 t.save()
                 continue
@@ -267,7 +262,6 @@ async def loop():
 @bot.event
 async def on_ready():
     print(f"Bot online {bot.user}")
-
     clean_channels()
     load_channels()
 
@@ -284,7 +278,6 @@ async def on_ready():
 async def setskladchannel(ctx, channel: discord.TextChannel):
     if not has_access(ctx.author):
         return await ctx.respond("❌ Нет прав", ephemeral=True)
-
     set_channel(ctx.guild.id, channel.id, "sklad")
     await ctx.respond("✅ склад установлен", ephemeral=True)
 
@@ -295,7 +288,6 @@ async def setsimpletimer(ctx, channel: discord.TextChannel = None, thread_id: st
         return await ctx.respond("❌ Нет прав", ephemeral=True)
 
     target_id = None
-
     if channel:
         target_id = channel.id
     elif thread_id:
@@ -316,7 +308,6 @@ async def setmpf(ctx, channel: discord.TextChannel = None, thread_id: str = None
         return await ctx.respond("❌ Нет прав", ephemeral=True)
 
     target_id = None
-
     if channel:
         target_id = channel.id
     elif thread_id:
@@ -340,6 +331,8 @@ async def timer(ctx, название: str, days: int = 0, hours: int = 0, minut
     if not channel_id or ctx.channel.id != channel_id:
         return await ctx.respond("❌ не тот канал", ephemeral=True)
 
+    await ctx.defer(ephemeral=True)
+
     end = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(
         days=days, hours=hours, minutes=minutes
     )
@@ -360,7 +353,7 @@ async def timer(ctx, название: str, days: int = 0, hours: int = 0, minut
         kind="timer"
     )
 
-    await ctx.respond("✅ таймер создан", ephemeral=True)
+    await ctx.followup.send("✅ таймер создан", ephemeral=True)
 
 
 @bot.slash_command(name="склад", guild_ids=[GUILD_ID])
@@ -368,6 +361,8 @@ async def sklad(ctx, гекс: str, регион: str, склад: str, паро
     channel_id = get_channel(ctx.guild.id, "sklad")
     if channel_id and ctx.channel.id != channel_id:
         return await ctx.respond("❌ не тот канал", ephemeral=True)
+
+    await ctx.defer(ephemeral=True)
 
     end_ts = int((datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=48)).timestamp())
 
@@ -394,7 +389,7 @@ async def sklad(ctx, гекс: str, регион: str, склад: str, паро
         kind="sklad"
     )
 
-    await ctx.respond("✅ склад создан", ephemeral=True)
+    await ctx.followup.send("✅ склад создан", ephemeral=True)
 
 
 @bot.slash_command(name="мпф", guild_ids=[GUILD_ID])
@@ -402,6 +397,8 @@ async def mpf(ctx, что_поставил: str, ящиков: int, days: int = 
     channel_id = get_channel(ctx.guild.id, "mpf")
     if not channel_id or ctx.channel.id != channel_id:
         return await ctx.respond("❌ не тот канал", ephemeral=True)
+
+    await ctx.defer(ephemeral=True)
 
     end = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(
         days=days, hours=hours, minutes=minutes
@@ -430,7 +427,8 @@ async def mpf(ctx, что_поставил: str, ящиков: int, days: int = 
         taken_by=None
     )
 
-    await ctx.respond("✅ MPF создан", ephemeral=True)
+    await ctx.followup.send("✅ MPF создан", ephemeral=True)
+
 
 # RUN
 bot.run(os.environ.get("DISCORD_BOT_TOKEN"))
