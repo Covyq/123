@@ -1,8 +1,10 @@
 import os
+import re
 import datetime
 import traceback
 import logging
 
+import aiohttp
 import discord
 from discord.ext import tasks
 from peewee import *
@@ -13,10 +15,15 @@ from peewee import *
 # =========================
 GUILD_ID = 419565206335651840
 
+FOXHOLE_APP_ID = 505460
+
 ONLINE_CHANNEL_NAME_TEMPLATE = "🟢｜foxhole-онлайн-{count}"
 
 LAST_CHANNEL_RENAME = {}
 CHANNEL_RENAME_COOLDOWN_SECONDS = 30
+
+STEAM_CHECK_CACHE = {}
+STEAM_CACHE_SECONDS = 60
 
 ONLINE_SETTER_ROLE_IDS = [
     1420081710510379079,
@@ -106,21 +113,24 @@ class OnlineMessage(BaseModel):
     message_id = BigIntegerField()
 
 
+class SteamLink(BaseModel):
+    guild_id = BigIntegerField()
+    discord_user_id = BigIntegerField()
+    steam_id = CharField()
+
+    class Meta:
+        indexes = (
+            (("guild_id", "discord_user_id"), True),
+        )
+
+
 db.connect(reuse_if_open=True)
-db.create_tables([OnlineChannel, OnlineMessage])
+db.create_tables([OnlineChannel, OnlineMessage, SteamLink])
 
 
 # =========================
-# ONLINE LOGIC
+# РОЛИ
 # =========================
-def is_playing_foxhole(member):
-    for activity in getattr(member, "activities", []):
-        name = getattr(activity, "name", "")
-        if name and name.lower() == "foxhole":
-            return True
-    return False
-
-
 def member_has_any_role(member, role_ids):
     member_role_ids = {role.id for role in member.roles}
     return bool(set(role_ids) & member_role_ids)
@@ -138,17 +148,126 @@ def get_all_role_ids_from_groups():
     return role_ids
 
 
-def get_online_members(guild):
-    allowed_role_ids = get_all_role_ids_from_groups()
+# =========================
+# DISCORD ACTIVITY
+# =========================
+def is_playing_foxhole_discord(member):
+    for activity in getattr(member, "activities", []):
+        name = getattr(activity, "name", "")
+        if name and name.lower() == "foxhole":
+            return True
 
-    return [
-        member for member in guild.members
-        if (
-            not member.bot
-            and is_playing_foxhole(member)
-            and member_has_any_role(member, allowed_role_ids)
+    return False
+
+
+# =========================
+# STEAM API
+# =========================
+def get_steam_api_key():
+    return os.environ.get("STEAM_API_KEY")
+
+
+def is_valid_steam_id64(steam_id):
+    return bool(re.fullmatch(r"\d{17}", steam_id))
+
+
+async def is_playing_foxhole_steam(discord_user_id):
+    steam_api_key = get_steam_api_key()
+
+    if not steam_api_key:
+        return False
+
+    link = SteamLink.get_or_none(
+        SteamLink.discord_user_id == discord_user_id
+    )
+
+    if not link:
+        return False
+
+    now = datetime.datetime.now(datetime.timezone.utc)
+    cached = STEAM_CHECK_CACHE.get(link.steam_id)
+
+    if cached:
+        cached_time, cached_result = cached
+        diff = (now - cached_time).total_seconds()
+
+        if diff < STEAM_CACHE_SECONDS:
+            return cached_result
+
+    url = "https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/"
+
+    params = {
+        "key": steam_api_key,
+        "steamids": link.steam_id,
+    }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, params=params, timeout=10) as response:
+                if response.status != 200:
+                    logger.warning(
+                        f"Steam API вернул статус {response.status} "
+                        f"для SteamID {link.steam_id}"
+                    )
+                    STEAM_CHECK_CACHE[link.steam_id] = (now, False)
+                    return False
+
+                data = await response.json()
+
+        players = (
+            data
+            .get("response", {})
+            .get("players", [])
         )
-    ]
+
+        if not players:
+            STEAM_CHECK_CACHE[link.steam_id] = (now, False)
+            return False
+
+        player = players[0]
+        game_id = str(player.get("gameid", ""))
+
+        result = game_id == str(FOXHOLE_APP_ID)
+
+        STEAM_CHECK_CACHE[link.steam_id] = (now, result)
+
+        return result
+
+    except Exception:
+        logger.error("Ошибка проверки Steam API:")
+        logger.error(traceback.format_exc())
+        STEAM_CHECK_CACHE[link.steam_id] = (now, False)
+        return False
+
+
+async def is_playing_foxhole(member):
+    if is_playing_foxhole_discord(member):
+        return True
+
+    if await is_playing_foxhole_steam(member.id):
+        return True
+
+    return False
+
+
+# =========================
+# ONLINE LOGIC
+# =========================
+async def get_online_members(guild):
+    allowed_role_ids = get_all_role_ids_from_groups()
+    online_members = []
+
+    for member in guild.members:
+        if member.bot:
+            continue
+
+        if not member_has_any_role(member, allowed_role_ids):
+            continue
+
+        if await is_playing_foxhole(member):
+            online_members.append(member)
+
+    return online_members
 
 
 def get_mentions(members):
@@ -171,8 +290,8 @@ def get_members_by_roles(online_members, role_ids):
     ]
 
 
-def build_online_embed(guild):
-    online_members = get_online_members(guild)
+async def build_online_embed(guild):
+    online_members = await get_online_members(guild)
 
     embed = discord.Embed(
         title="🟢 Онлайн Foxhole",
@@ -216,10 +335,12 @@ def build_online_embed(guild):
                 inline=False,
             )
 
-    embed.set_footer(text="Обновляется каждые 30 секунд")
+    embed.set_footer(
+        text="Обновляется каждые 30 секунд | Discord Activity или Steam API"
+    )
     embed.timestamp = datetime.datetime.now(datetime.timezone.utc)
 
-    return embed
+    return embed, online_members
 
 
 async def update_online_channel_name(guild, channel, count):
@@ -262,12 +383,10 @@ async def update_online_for_guild(guild):
         logger.warning(f"Канал/ветка не найдены: {row.channel_id}")
         return
 
-    online_members = get_online_members(guild)
+    embed, online_members = await build_online_embed(guild)
     online_count = len(online_members)
 
     await update_online_channel_name(guild, channel, online_count)
-
-    embed = build_online_embed(guild)
 
     msg_row = OnlineMessage.get_or_none(
         OnlineMessage.guild_id == guild.id
@@ -309,6 +428,46 @@ async def online_loop():
             await update_online_for_guild(guild)
         except Exception:
             logger.error(traceback.format_exc())
+
+
+# =========================
+# COMMAND /steam
+# =========================
+@bot.slash_command(name="steam", guild_ids=[GUILD_ID])
+async def steam(
+    ctx,
+    steam_id: str,
+):
+    steam_id = steam_id.strip()
+
+    if not is_valid_steam_id64(steam_id):
+        return await ctx.respond(
+            "❌ Неверный SteamID64. Он должен состоять из 17 цифр.\n"
+            "Пример: `76561198000000000`",
+            ephemeral=True,
+        )
+
+    row = SteamLink.get_or_none(
+        (SteamLink.guild_id == ctx.guild.id)
+        & (SteamLink.discord_user_id == ctx.author.id)
+    )
+
+    if row:
+        row.steam_id = steam_id
+        row.save()
+    else:
+        SteamLink.create(
+            guild_id=ctx.guild.id,
+            discord_user_id=ctx.author.id,
+            steam_id=steam_id,
+        )
+
+    await ctx.respond(
+        f"✅ SteamID привязан к тебе: `{steam_id}`\n"
+        "Теперь бот сможет показывать тебя в онлайне через Steam API, "
+        "если твой профиль Steam и игровая активность открыты.",
+        ephemeral=True,
+    )
 
 
 # =========================
@@ -392,6 +551,12 @@ token = os.environ.get("DISCORD_BOT_TOKEN")
 
 if not token:
     raise RuntimeError("Не найден DISCORD_BOT_TOKEN")
+
+if not get_steam_api_key():
+    logger.warning(
+        "STEAM_API_KEY не найден. Steam API работать не будет, "
+        "но Discord Activity продолжит работать."
+    )
 
 try:
     bot.run(token)
