@@ -13,16 +13,11 @@ from peewee import *
 # =========================
 GUILD_ID = 419565206335651840
 
-# Название канала онлайна
-# {count} автоматически заменяется на количество людей в Foxhole
 ONLINE_CHANNEL_NAME_TEMPLATE = "🟢｜foxhole-онлайн-{count}"
 
-# Discord не любит слишком частое переименование каналов
-# 600 секунд = 10 минут
 LAST_CHANNEL_RENAME = {}
-CHANNEL_RENAME_COOLDOWN_SECONDS = 600
+CHANNEL_RENAME_COOLDOWN_SECONDS = 30
 
-# Роли, которым разрешено использовать /онлайн для назначения чата онлайна
 ONLINE_SETTER_ROLE_IDS = [
     1420081710510379079,
     694197038362918923,
@@ -33,18 +28,10 @@ ONLINE_SETTER_ROLE_IDS = [
     1224787828815171595,
 ]
 
-# ВАЖНО:
-# Люди будут отображаться в /онлайн только если:
-# 1) они играют в Foxhole
-# 2) у них есть хотя бы одна роль из этого списка
-#
-# Сюда впиши роль, которая разрешает человеку отображаться в онлайне.
-# Например: роль участника клана ROD.
 ONLINE_VISIBLE_ROLE_IDS = [
     556531210323492874,
 ]
 
-# Основные роли
 ONLINE_ROLE_GROUPS = [
     {
         "title": "👑 Капитан",
@@ -85,7 +72,6 @@ ONLINE_ROLE_GROUPS = [
     },
 ]
 
-# Роды деятельности
 ONLINE_ACTIVITY_GROUPS = [
     {"title": "✈️ С ролью пилот", "role_ids": [1463921076433064227]},
     {"title": "🦊 С ролью партизан", "role_ids": [1501768722304598167]},
@@ -199,7 +185,6 @@ def build_online_embed(guild):
         description=f"👥 Всего в игре: {len(online_members)}",
     )
 
-    # Основные роли
     for group in ONLINE_ROLE_GROUPS:
         members = get_members_by_roles(
             online_members,
@@ -215,7 +200,6 @@ def build_online_embed(guild):
             inline=False,
         )
 
-    # Роды деятельности
     activity_fields = []
 
     for group in ONLINE_ACTIVITY_GROUPS:
@@ -266,12 +250,20 @@ async def update_online_channel_name(guild, channel, count):
     try:
         await channel.edit(name=new_name)
         LAST_CHANNEL_RENAME[guild.id] = now
+
+    except discord.HTTPException as e:
+        logger.warning(
+            f"Discord ограничил переименование канала. "
+            f"Канал: {channel.id}, ошибка: {e}"
+        )
+
     except Exception:
         logger.error(traceback.format_exc())
 
 
 async def update_online_for_guild(guild):
     row = OnlineChannel.get_or_none(OnlineChannel.guild_id == guild.id)
+
     if not row:
         return
 
@@ -288,13 +280,16 @@ async def update_online_for_guild(guild):
 
     embed = build_online_embed(guild)
 
-    msg_row = OnlineMessage.get_or_none(OnlineMessage.guild_id == guild.id)
+    msg_row = OnlineMessage.get_or_none(
+        OnlineMessage.guild_id == guild.id
+    )
 
     if msg_row:
         try:
             msg = await channel.fetch_message(msg_row.message_id)
             await msg.edit(embed=embed)
             return
+
         except Exception:
             logger.error(traceback.format_exc())
 
@@ -320,6 +315,7 @@ async def online_loop():
     for guild in bot.guilds:
         try:
             await update_online_for_guild(guild)
+
         except Exception:
             logger.error(traceback.format_exc())
 
@@ -349,6 +345,7 @@ async def онлайн(
     elif айди_ветки:
         try:
             target_id = int(айди_ветки)
+
         except ValueError:
             return await ctx.respond(
                 "❌ Неверный ID ветки.",
@@ -368,6 +365,7 @@ async def онлайн(
     if row:
         row.channel_id = target_id
         row.save()
+
     else:
         OnlineChannel.create(
             guild_id=ctx.guild.id,
