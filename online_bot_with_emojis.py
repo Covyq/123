@@ -13,8 +13,11 @@ from peewee import *
 # =========================
 GUILD_ID = 419565206335651840
 
+ONLINE_CHANNEL_NAME_TEMPLATE = "🟢｜foxhole-онлайн-{count}"
+LAST_CHANNEL_RENAME = {}
+CHANNEL_RENAME_COOLDOWN_SECONDS = 600
+
 # Роли, которым разрешено использовать /онлайн для назначения чата онлайна
-# Впиши сюда ID нужных ролей
 ONLINE_SETTER_ROLE_IDS = [
     1420081710510379079,
     694197038362918923,
@@ -79,6 +82,10 @@ ONLINE_ACTIVITY_GROUPS = [
     {"title": "🛩️ С ролью Авиация", "role_ids": [1463925850654248991]},
 ]
 
+
+# =========================
+# BOT
+# =========================
 intents = discord.Intents.all()
 bot = discord.Bot(intents=intents, debug_guilds=[GUILD_ID])
 
@@ -126,6 +133,13 @@ def is_playing_foxhole(member):
     return False
 
 
+def get_online_members(guild):
+    return [
+        member for member in guild.members
+        if not member.bot and is_playing_foxhole(member)
+    ]
+
+
 def get_mentions(members):
     if not members:
         return "—"
@@ -140,10 +154,7 @@ def get_mentions(members):
 
 
 def build_online_embed(guild):
-    online_members = [
-        m for m in guild.members
-        if not m.bot and is_playing_foxhole(m)
-    ]
+    online_members = get_online_members(guild)
 
     embed = discord.Embed(
         title="🟢 Онлайн Foxhole",
@@ -151,12 +162,11 @@ def build_online_embed(guild):
         description=f"👥 Всего в игре: {len(online_members)}",
     )
 
-    # Основные роли
     for group in ONLINE_ROLE_GROUPS:
         members = []
 
         for member in online_members:
-            role_ids = {r.id for r in member.roles}
+            role_ids = {role.id for role in member.roles}
 
             if set(group["role_ids"]) & role_ids:
                 members.append(member)
@@ -170,14 +180,13 @@ def build_online_embed(guild):
             inline=False,
         )
 
-    # Роды деятельности
     activity_fields = []
 
     for group in ONLINE_ACTIVITY_GROUPS:
         members = []
 
         for member in online_members:
-            role_ids = {r.id for r in member.roles}
+            role_ids = {role.id for role in member.roles}
 
             if set(group["role_ids"]) & role_ids:
                 members.append(member)
@@ -207,6 +216,27 @@ def build_online_embed(guild):
     return embed
 
 
+async def update_online_channel_name(guild, channel, count):
+    now = datetime.datetime.now(datetime.timezone.utc)
+    last_rename = LAST_CHANNEL_RENAME.get(guild.id)
+
+    if last_rename:
+        diff = (now - last_rename).total_seconds()
+        if diff < CHANNEL_RENAME_COOLDOWN_SECONDS:
+            return
+
+    new_name = ONLINE_CHANNEL_NAME_TEMPLATE.format(count=count)
+
+    if getattr(channel, "name", None) == new_name:
+        return
+
+    try:
+        await channel.edit(name=new_name)
+        LAST_CHANNEL_RENAME[guild.id] = now
+    except Exception:
+        logger.error(traceback.format_exc())
+
+
 async def update_online_for_guild(guild):
     row = OnlineChannel.get_or_none(OnlineChannel.guild_id == guild.id)
     if not row:
@@ -216,6 +246,11 @@ async def update_online_for_guild(guild):
     if not channel:
         logger.warning(f"Канал/ветка не найдены: {row.channel_id}")
         return
+
+    online_members = get_online_members(guild)
+    online_count = len(online_members)
+
+    await update_online_channel_name(guild, channel, online_count)
 
     embed = build_online_embed(guild)
 
@@ -280,9 +315,15 @@ async def онлайн(
         try:
             target_id = int(айди_ветки)
         except ValueError:
-            return await ctx.respond("❌ Неверный ID ветки", ephemeral=True)
+            return await ctx.respond(
+                "❌ Неверный ID ветки.",
+                ephemeral=True,
+            )
     else:
-        return await ctx.respond("❌ Укажи канал или айди_ветки", ephemeral=True)
+        return await ctx.respond(
+            "❌ Укажи канал или айди_ветки.",
+            ephemeral=True,
+        )
 
     row = OnlineChannel.get_or_none(OnlineChannel.guild_id == ctx.guild.id)
 
