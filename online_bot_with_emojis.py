@@ -13,7 +13,12 @@ from peewee import *
 # =========================
 GUILD_ID = 419565206335651840
 
+# Название канала онлайна
+# {count} автоматически заменяется на количество людей в Foxhole
 ONLINE_CHANNEL_NAME_TEMPLATE = "🟢｜foxhole-онлайн-{count}"
+
+# Discord не любит слишком частое переименование каналов
+# 600 секунд = 10 минут
 LAST_CHANNEL_RENAME = {}
 CHANNEL_RENAME_COOLDOWN_SECONDS = 600
 
@@ -28,6 +33,7 @@ ONLINE_SETTER_ROLE_IDS = [
     1224787828815171595,
 ]
 
+# Основные роли
 ONLINE_ROLE_GROUPS = [
     {
         "title": "👑 Капитан",
@@ -68,6 +74,18 @@ ONLINE_ROLE_GROUPS = [
     },
 ]
 
+# Отслеживаемые роли
+# Сюда вписывай любые роли, которые нужно отдельно выводить в /онлайн
+ONLINE_TRACKED_ROLE_GROUPS = [
+    {
+        "title": "⭐ Отслеживаемая роль",
+        "role_ids": [
+            123456789012345678,
+        ],
+    },
+]
+
+# Роды деятельности
 ONLINE_ACTIVITY_GROUPS = [
     {"title": "✈️ С ролью пилот", "role_ids": [1463921076433064227]},
     {"title": "🦊 С ролью партизан", "role_ids": [1501768722304598167]},
@@ -153,6 +171,18 @@ def get_mentions(members):
     return text
 
 
+def get_members_by_roles(online_members, role_ids):
+    found_members = []
+
+    for member in online_members:
+        member_role_ids = {role.id for role in member.roles}
+
+        if set(role_ids) & member_role_ids:
+            found_members.append(member)
+
+    return found_members
+
+
 def build_online_embed(guild):
     online_members = get_online_members(guild)
 
@@ -162,14 +192,12 @@ def build_online_embed(guild):
         description=f"👥 Всего в игре: {len(online_members)}",
     )
 
+    # Основные роли
     for group in ONLINE_ROLE_GROUPS:
-        members = []
-
-        for member in online_members:
-            role_ids = {role.id for role in member.roles}
-
-            if set(group["role_ids"]) & role_ids:
-                members.append(member)
+        members = get_members_by_roles(
+            online_members,
+            group["role_ids"],
+        )
 
         if not members:
             continue
@@ -180,16 +208,42 @@ def build_online_embed(guild):
             inline=False,
         )
 
+    # Отслеживаемые роли
+    tracked_fields = []
+
+    for group in ONLINE_TRACKED_ROLE_GROUPS:
+        members = get_members_by_roles(
+            online_members,
+            group["role_ids"],
+        )
+
+        if not members:
+            continue
+
+        tracked_fields.append((group["title"], members))
+
+    if tracked_fields:
+        embed.add_field(
+            name="--------------------",
+            value="⭐ Отслеживаемые роли:",
+            inline=False,
+        )
+
+        for title, members in tracked_fields:
+            embed.add_field(
+                name=f"{title}: {len(members)}",
+                value=get_mentions(members),
+                inline=False,
+            )
+
+    # Роды деятельности
     activity_fields = []
 
     for group in ONLINE_ACTIVITY_GROUPS:
-        members = []
-
-        for member in online_members:
-            role_ids = {role.id for role in member.roles}
-
-            if set(group["role_ids"]) & role_ids:
-                members.append(member)
+        members = get_members_by_roles(
+            online_members,
+            group["role_ids"],
+        )
 
         if not members:
             continue
@@ -243,6 +297,7 @@ async def update_online_for_guild(guild):
         return
 
     channel = guild.get_channel_or_thread(row.channel_id)
+
     if not channel:
         logger.warning(f"Канал/ветка не найдены: {row.channel_id}")
         return
@@ -291,7 +346,7 @@ async def online_loop():
 
 
 # =========================
-# COMMAND
+# COMMAND /онлайн
 # =========================
 @bot.slash_command(name="онлайн", guild_ids=[GUILD_ID])
 async def онлайн(
@@ -311,6 +366,7 @@ async def онлайн(
 
     if канал:
         target_id = канал.id
+
     elif айди_ветки:
         try:
             target_id = int(айди_ветки)
@@ -319,13 +375,16 @@ async def онлайн(
                 "❌ Неверный ID ветки.",
                 ephemeral=True,
             )
+
     else:
         return await ctx.respond(
             "❌ Укажи канал или айди_ветки.",
             ephemeral=True,
         )
 
-    row = OnlineChannel.get_or_none(OnlineChannel.guild_id == ctx.guild.id)
+    row = OnlineChannel.get_or_none(
+        OnlineChannel.guild_id == ctx.guild.id
+    )
 
     if row:
         row.channel_id = target_id
