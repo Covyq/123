@@ -33,6 +33,17 @@ ONLINE_SETTER_ROLE_IDS = [
     1224787828815171595,
 ]
 
+# ВАЖНО:
+# Люди будут отображаться в /онлайн только если:
+# 1) они играют в Foxhole
+# 2) у них есть хотя бы одна роль из этого списка
+#
+# Сюда впиши роль, которая разрешает человеку отображаться в онлайне.
+# Например: роль участника клана ROD.
+ONLINE_VISIBLE_ROLE_IDS = [
+    123456789012345678,
+]
+
 # Основные роли
 ONLINE_ROLE_GROUPS = [
     {
@@ -71,17 +82,6 @@ ONLINE_ROLE_GROUPS = [
     {
         "title": "🩸 Свежая кровь",
         "role_ids": [831271336612593714],
-    },
-]
-
-# Отслеживаемые роли
-# Сюда вписывай любые роли, которые нужно отдельно выводить в /онлайн
-ONLINE_TRACKED_ROLE_GROUPS = [
-    {
-        "title": "⭐ Отслеживаемая роль",
-        "role_ids": [
-            123456789012345678,
-        ],
     },
 ]
 
@@ -151,10 +151,19 @@ def is_playing_foxhole(member):
     return False
 
 
+def member_has_any_role(member, role_ids):
+    member_role_ids = {role.id for role in member.roles}
+    return bool(set(role_ids) & member_role_ids)
+
+
 def get_online_members(guild):
     return [
         member for member in guild.members
-        if not member.bot and is_playing_foxhole(member)
+        if (
+            not member.bot
+            and is_playing_foxhole(member)
+            and member_has_any_role(member, ONLINE_VISIBLE_ROLE_IDS)
+        )
     ]
 
 
@@ -175,9 +184,7 @@ def get_members_by_roles(online_members, role_ids):
     found_members = []
 
     for member in online_members:
-        member_role_ids = {role.id for role in member.roles}
-
-        if set(role_ids) & member_role_ids:
+        if member_has_any_role(member, role_ids):
             found_members.append(member)
 
     return found_members
@@ -207,34 +214,6 @@ def build_online_embed(guild):
             value=get_mentions(members),
             inline=False,
         )
-
-    # Отслеживаемые роли
-    tracked_fields = []
-
-    for group in ONLINE_TRACKED_ROLE_GROUPS:
-        members = get_members_by_roles(
-            online_members,
-            group["role_ids"],
-        )
-
-        if not members:
-            continue
-
-        tracked_fields.append((group["title"], members))
-
-    if tracked_fields:
-        embed.add_field(
-            name="--------------------",
-            value="⭐ Отслеживаемые роли:",
-            inline=False,
-        )
-
-        for title, members in tracked_fields:
-            embed.add_field(
-                name=f"{title}: {len(members)}",
-                value=get_mentions(members),
-                inline=False,
-            )
 
     # Роды деятельности
     activity_fields = []
