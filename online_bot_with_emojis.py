@@ -28,19 +28,9 @@ ONLINE_SETTER_ROLE_IDS = [
     1224787828815171595,
 ]
 
-ONLINE_VISIBLE_ROLE_IDS = [
-    556531210323492874,
-]
-
 ONLINE_ROLE_GROUPS = [
-    {
-        "title": "👑 Капитан",
-        "role_ids": [422500854910681089],
-    },
-    {
-        "title": "🛡️ Зам. капитана",
-        "role_ids": [1224787828815171595],
-    },
+    {"title": "👑 Капитан", "role_ids": [422500854910681089]},
+    {"title": "🛡️ Зам. капитана", "role_ids": [1224787828815171595]},
     {
         "title": "🎖️ Офицерский состав",
         "role_ids": [
@@ -50,7 +40,6 @@ ONLINE_ROLE_GROUPS = [
             1501801258594467870,
             1501801774414299198,
             1501801928915419269,
-            1501800302024720464,
         ],
     },
     {
@@ -63,14 +52,8 @@ ONLINE_ROLE_GROUPS = [
             1501801036539756635,
         ],
     },
-    {
-        "title": "🪖 Бойцы",
-        "role_ids": [1210544000600375297],
-    },
-    {
-        "title": "🩸 Свежая кровь",
-        "role_ids": [831271336612593714],
-    },
+    {"title": "🪖 Бойцы", "role_ids": [1210544000600375297]},
+    {"title": "🩸 Свежая кровь", "role_ids": [831271336612593714]},
 ]
 
 ONLINE_ACTIVITY_GROUPS = [
@@ -86,6 +69,13 @@ ONLINE_ACTIVITY_GROUPS = [
     {"title": "🚨 С ролью QRF", "role_ids": [1390688779056058429]},
     {"title": "🛩️ С ролью Авиация", "role_ids": [1463925850654248991]},
 ]
+
+
+# =========================
+# ЛОГИ
+# =========================
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 # =========================
@@ -121,13 +111,6 @@ db.create_tables([OnlineChannel, OnlineMessage])
 
 
 # =========================
-# ЛОГИ
-# =========================
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-
-# =========================
 # ONLINE LOGIC
 # =========================
 def is_playing_foxhole(member):
@@ -135,7 +118,6 @@ def is_playing_foxhole(member):
         name = getattr(activity, "name", "")
         if name and name.lower() == "foxhole":
             return True
-
     return False
 
 
@@ -144,19 +126,29 @@ def member_has_any_role(member, role_ids):
     return bool(set(role_ids) & member_role_ids)
 
 
+def get_all_role_ids_from_groups():
+    role_ids = set()
+
+    for group in ONLINE_ROLE_GROUPS:
+        role_ids.update(group["role_ids"])
+
+    for group in ONLINE_ACTIVITY_GROUPS:
+        role_ids.update(group["role_ids"])
+
+    return role_ids
+
+
 def get_online_members(guild):
-    online_members = []
+    allowed_role_ids = get_all_role_ids_from_groups()
 
-    for member in guild.members:
-        if member.bot:
-            continue
-
-        if not is_playing_foxhole(member):
-            continue
-
-        online_members.append(member)
-
-    return online_members
+    return [
+        member for member in guild.members
+        if (
+            not member.bot
+            and is_playing_foxhole(member)
+            and member_has_any_role(member, allowed_role_ids)
+        )
+    ]
 
 
 def get_mentions(members):
@@ -173,13 +165,10 @@ def get_mentions(members):
 
 
 def get_members_by_roles(online_members, role_ids):
-    found_members = []
-
-    for member in online_members:
-        if member_has_any_role(member, role_ids):
-            found_members.append(member)
-
-    return found_members
+    return [
+        member for member in online_members
+        if member_has_any_role(member, role_ids)
+    ]
 
 
 def build_online_embed(guild):
@@ -192,10 +181,7 @@ def build_online_embed(guild):
     )
 
     for group in ONLINE_ROLE_GROUPS:
-        members = get_members_by_roles(
-            online_members,
-            group["role_ids"],
-        )
+        members = get_members_by_roles(online_members, group["role_ids"])
 
         if not members:
             continue
@@ -209,10 +195,7 @@ def build_online_embed(guild):
     activity_fields = []
 
     for group in ONLINE_ACTIVITY_GROUPS:
-        members = get_members_by_roles(
-            online_members,
-            group["role_ids"],
-        )
+        members = get_members_by_roles(online_members, group["role_ids"])
 
         if not members:
             continue
@@ -316,14 +299,21 @@ async def update_online_for_guild(guild):
         logger.error(traceback.format_exc())
 
 
+# =========================
+# LOOP
+# =========================
 @tasks.loop(seconds=30)
 async def online_loop():
     for guild in bot.guilds:
         try:
             await update_online_for_guild(guild)
-
         except Exception:
             logger.error(traceback.format_exc())
+
+
+@online_loop.before_loop
+async def before_online_loop():
+    await bot.wait_until_ready()
 
 
 # =========================
@@ -351,7 +341,6 @@ async def онлайн(
     elif айди_ветки:
         try:
             target_id = int(айди_ветки)
-
         except ValueError:
             return await ctx.respond(
                 "❌ Неверный ID ветки.",
@@ -371,7 +360,6 @@ async def онлайн(
     if row:
         row.channel_id = target_id
         row.save()
-
     else:
         OnlineChannel.create(
             guild_id=ctx.guild.id,
@@ -405,4 +393,8 @@ token = os.environ.get("DISCORD_BOT_TOKEN")
 if not token:
     raise RuntimeError("Не найден DISCORD_BOT_TOKEN")
 
-bot.run(token)
+try:
+    bot.run(token)
+except Exception:
+    logger.error("КРИТИЧЕСКАЯ ОШИБКА ПРИ ЗАПУСКЕ БОТА:")
+    logger.error(traceback.format_exc())
