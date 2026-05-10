@@ -17,11 +17,6 @@ GUILD_ID = 419565206335651840
 
 FOXHOLE_APP_ID = 505460
 
-ONLINE_CHANNEL_NAME_TEMPLATE = "🟢｜foxhole-онлайн-{count}"
-
-LAST_CHANNEL_RENAME = {}
-CHANNEL_RENAME_COOLDOWN_SECONDS = 30
-
 STEAM_CHECK_CACHE = {}
 STEAM_CACHE_SECONDS = 60
 
@@ -339,34 +334,6 @@ async def build_online_embed(guild):
     return embed, online_members
 
 
-async def update_online_channel_name(guild, channel, count):
-    now = datetime.datetime.now(datetime.timezone.utc)
-    last_rename = LAST_CHANNEL_RENAME.get(guild.id)
-
-    if last_rename:
-        diff = (now - last_rename).total_seconds()
-        if diff < CHANNEL_RENAME_COOLDOWN_SECONDS:
-            return
-
-    new_name = ONLINE_CHANNEL_NAME_TEMPLATE.format(count=count)
-
-    if getattr(channel, "name", None) == new_name:
-        return
-
-    try:
-        await channel.edit(name=new_name)
-        LAST_CHANNEL_RENAME[guild.id] = now
-
-    except discord.HTTPException as e:
-        logger.warning(
-            f"Discord ограничил переименование канала. "
-            f"Канал: {channel.id}, ошибка: {e}"
-        )
-
-    except Exception:
-        logger.error(traceback.format_exc())
-
-
 async def update_online_for_guild(guild):
     row = OnlineChannel.get_or_none(OnlineChannel.guild_id == guild.id)
 
@@ -380,9 +347,6 @@ async def update_online_for_guild(guild):
         return
 
     embed, online_members = await build_online_embed(guild)
-    online_count = len(online_members)
-
-    await update_online_channel_name(guild, channel, online_count)
 
     msg_row = OnlineMessage.get_or_none(
         OnlineMessage.guild_id == guild.id
@@ -565,11 +529,4 @@ if not get_steam_api_key():
         "но Discord Activity продолжит работать."
     )
 
-try:
-    bot.run(token)
-except KeyboardInterrupt:
-    logger.info("Бот остановлен вручную")
-except Exception:
-    logger.error("КРИТИЧЕСКАЯ ОШИБКА ПРИ ЗАПУСКЕ БОТА:")
-    logger.error(traceback.format_exc())
-    raise
+bot.run(token)
