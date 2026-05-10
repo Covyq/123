@@ -311,11 +311,6 @@ async def online_loop():
             logger.error(traceback.format_exc())
 
 
-@online_loop.before_loop
-async def before_online_loop():
-    await bot.wait_until_ready()
-
-
 # =========================
 # COMMAND /онлайн
 # =========================
@@ -381,8 +376,13 @@ async def онлайн(
 async def on_ready():
     logger.info(f"Бот онлайн: {bot.user}")
 
-    if not online_loop.is_running():
-        online_loop.start()
+    try:
+        if not online_loop.is_running():
+            online_loop.start()
+            logger.info("Цикл online_loop запущен")
+    except Exception:
+        logger.error("Ошибка запуска online_loop:")
+        logger.error(traceback.format_exc())
 
 
 # =========================
@@ -395,6 +395,9 @@ if not token:
 
 try:
     bot.run(token)
+except KeyboardInterrupt:
+    logger.info("Бот остановлен вручную")
 except Exception:
     logger.error("КРИТИЧЕСКАЯ ОШИБКА ПРИ ЗАПУСКЕ БОТА:")
     logger.error(traceback.format_exc())
+    raise
