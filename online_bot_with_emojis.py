@@ -171,14 +171,15 @@ def is_valid_steam_id64(steam_id):
     return bool(re.fullmatch(r"\d{17}", steam_id))
 
 
-async def is_playing_foxhole_steam(discord_user_id):
+async def is_playing_foxhole_steam(guild_id, discord_user_id):
     steam_api_key = get_steam_api_key()
 
     if not steam_api_key:
         return False
 
     link = SteamLink.get_or_none(
-        SteamLink.discord_user_id == discord_user_id
+        (SteamLink.guild_id == guild_id)
+        & (SteamLink.discord_user_id == discord_user_id)
     )
 
     if not link:
@@ -214,11 +215,7 @@ async def is_playing_foxhole_steam(discord_user_id):
 
                 data = await response.json()
 
-        players = (
-            data
-            .get("response", {})
-            .get("players", [])
-        )
+        players = data.get("response", {}).get("players", [])
 
         if not players:
             STEAM_CHECK_CACHE[link.steam_id] = (now, False)
@@ -228,7 +225,6 @@ async def is_playing_foxhole_steam(discord_user_id):
         game_id = str(player.get("gameid", ""))
 
         result = game_id == str(FOXHOLE_APP_ID)
-
         STEAM_CHECK_CACHE[link.steam_id] = (now, result)
 
         return result
@@ -244,7 +240,7 @@ async def is_playing_foxhole(member):
     if is_playing_foxhole_discord(member):
         return True
 
-    if await is_playing_foxhole_steam(member.id):
+    if await is_playing_foxhole_steam(member.guild.id, member.id):
         return True
 
     return False
@@ -436,20 +432,29 @@ async def online_loop():
 @bot.slash_command(name="steam", guild_ids=[GUILD_ID])
 async def steam(
     ctx,
+    пользователь: discord.Member,
     steam_id: str,
 ):
+    user_role_ids = {role.id for role in ctx.author.roles}
+
+    if not (user_role_ids & set(ONLINE_SETTER_ROLE_IDS)):
+        return await ctx.respond(
+            "❌ У тебя нет прав привязывать Steam аккаунты.",
+            ephemeral=True,
+        )
+
     steam_id = steam_id.strip()
 
     if not is_valid_steam_id64(steam_id):
         return await ctx.respond(
-            "❌ Неверный SteamID64. Он должен состоять из 17 цифр.\n"
+            "❌ Неверный SteamID64.\n"
             "Пример: `76561198000000000`",
             ephemeral=True,
         )
 
     row = SteamLink.get_or_none(
         (SteamLink.guild_id == ctx.guild.id)
-        & (SteamLink.discord_user_id == ctx.author.id)
+        & (SteamLink.discord_user_id == пользователь.id)
     )
 
     if row:
@@ -458,14 +463,16 @@ async def steam(
     else:
         SteamLink.create(
             guild_id=ctx.guild.id,
-            discord_user_id=ctx.author.id,
+            discord_user_id=пользователь.id,
             steam_id=steam_id,
         )
 
+    STEAM_CHECK_CACHE.pop(steam_id, None)
+
     await ctx.respond(
-        f"✅ SteamID привязан к тебе: `{steam_id}`\n"
-        "Теперь бот сможет показывать тебя в онлайне через Steam API, "
-        "если твой профиль Steam и игровая активность открыты.",
+        f"✅ SteamID привязан.\n"
+        f"👤 Пользователь: {пользователь.mention}\n"
+        f"🎮 SteamID64: `{steam_id}`",
         ephemeral=True,
     )
 
