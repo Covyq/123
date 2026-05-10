@@ -44,11 +44,8 @@ ONLINE_ROLE_GROUPS = [
     {
         "title": "🎖️ Офицерский состав",
         "role_ids": [
-            422500854910681089,
-            1224787828815171595,
             1501797623550578889,
             1501799982389264494,
-            1501800302024720464,
             1501800617176203444,
             1501801258594467870,
             1501801774414299198,
@@ -137,6 +134,7 @@ def is_playing_foxhole(member):
         name = getattr(activity, "name", "")
         if name and name.lower() == "foxhole":
             return True
+
     return False
 
 
@@ -146,14 +144,18 @@ def member_has_any_role(member, role_ids):
 
 
 def get_online_members(guild):
-    return [
-        member for member in guild.members
-        if (
-            not member.bot
-            and is_playing_foxhole(member)
-            and member_has_any_role(member, ONLINE_VISIBLE_ROLE_IDS)
-        )
-    ]
+    online_members = []
+
+    for member in guild.members:
+        if member.bot:
+            continue
+
+        if not is_playing_foxhole(member):
+            continue
+
+        online_members.append(member)
+
+    return online_members
 
 
 def get_mentions(members):
