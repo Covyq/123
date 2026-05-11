@@ -1,4 +1,4 @@
-discord.py
+py-cord
 peewee
 python-dotenv
 aiohttp
