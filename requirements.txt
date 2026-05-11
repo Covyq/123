@@ -1,3 +1,5 @@
+discord.py
 peewee
-py-cord
+python-dotenv
 aiohttp
+PyNaCl
